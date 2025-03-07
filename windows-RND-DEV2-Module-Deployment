@@ -1,0 +1,188 @@
+@Library("jenkins-shared-library") _
+
+pipeline {
+    agent {
+        label 'Agent-249'
+    }
+
+    options {
+        // Set the custom checkout directory
+        skipDefaultCheckout(true)
+    }
+
+    parameters {
+       string(name: 'Build_Version', defaultValue: '1.0', description: 'Specify the version to build')
+       // string(name: 'Start_Revision', defaultValue: 'TAIL', description: 'Start revision for build')
+       // string(name: 'End_Revision', defaultValue: 'HEAD', description: 'End revision for build')
+       // string(name: 'Branch_Name', defaultValue: 'main', description: 'Branch to build')
+        choice(name: 'Module_Name', choices: ['grc', 'issue', 'risk', 'controltesting', 'businessresilience', 'survey', 'admin', 'engine', 'attendance', 'documentmanagment', 'employee', 'incident', 'keyshield', 'leave', 'monitor', 'project', 'resolve', 'syscare', 'vendor', 'internalaudit', 'loss', 'crm' ], description: 'Module to Deploy')
+    }
+
+     stages {
+        stage('Workspace_Cleanup') {
+            steps {
+                script {
+                    dir("${params.Platform_Type}") {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+
+        stage('Stop_service') {
+            steps {
+                script {
+                    bat """
+                        @echo off
+                        setlocal
+
+                        REM Set BUILD_ID environment variable to avoid Jenkins killing the process
+                        set BUILD_ID=dontKillMe
+
+                        REM Trigger the scheduled task for Node.js
+                        schtasks /run /tn "Client_Server-STOP"
+
+                        echo "HRMS Application Stoped successfully."
+
+                        REM End local environment block
+                        endlocal
+
+                        REM Exit script, Jenkins should now complete
+                        exit /b 0
+                    """
+                }
+            }
+        }
+
+stage('Nexus_Download') {
+    steps {
+        script {
+            bat """
+                @echo off
+                REM Define the destination directory
+                set "destinationDir=D:/HRMS/exportFiles"
+
+                REM Check if the destination directory exists
+                if exist "%destinationDir%" (
+                    echo Directory exists. Deleting all files and folders in %destinationDir%...
+                    del /q /f "%destinationDir%\\*" >nul 2>&1
+                    for /d %%p in ("%destinationDir%\\*") do rmdir "%%p" /s /q
+                ) else (
+                    echo Directory does not exist. Creating the directory...
+                    mkdir "%destinationDir%"
+                )
+
+                REM Main logic
+                REM Define the Nexus repository URL and structure
+                set "nexusUrl=http://rndnexus.progrec.com/repository/Module-ProGReC-APPS"
+                set "fileUrl=%nexusUrl%/%Module_Name%/%Module_Name%-%Build_Version%.zip"
+
+                REM Define the destination path for the downloaded file
+                set "destinationPath=%destinationDir%/%Module_Name%-%Build_Version%.zip"
+
+                REM Download the file using PowerShell
+                echo Downloading %fileUrl%...
+                powershell -Command "Invoke-WebRequest -Uri '%fileUrl%' -OutFile '%destinationPath%'"
+
+                REM Check if the download was successful
+                if exist "%destinationPath%" (
+                    echo File downloaded successfully to %destinationPath%
+                ) else (
+                    echo Failed to download the file. Please check the module name and version.
+                )
+            """
+        }
+    }
+}
+
+stage('Run_Deployment') {
+    steps {
+        script {
+            // Start the Java application and redirect the output to a log file
+            def result = bat(
+                script: '''
+                    cd D:/HRMS/Startup_scripts
+                    start /b java -jar DeploymentMaintenence-1.0.jar > deployment.log
+                ''',
+                returnStdout: true
+            ).trim()
+
+            // Wait for a specific message in the log and display log contents in Jenkins dashboard
+            timeout(time: 10, unit: 'MINUTES') {
+                waitUntil {
+                    def logContent = readFile('D:/HRMS/Startup_scripts/deployment.log')
+                    echo logContent // This will display the log in the Jenkins console output
+
+                    if (logContent =~ /(?i)ALL THE MODULES IMPORTED SUCCESSFULLY/) {
+                        bat """
+                        REM Trigger the scheduled task for Node.js
+                        schtasks /run /tn "Client_Server-STOP"
+                        """
+                        echo 'Objects Import job finished, Please check the imports were successful'
+                        return true
+                    } else {
+                        return false
+                    }
+                }
+           }
+
+           // Optionally, kill the Java process if it is still running
+           //bat 'taskkill /F /IM java.exe'
+        }
+    }
+}
+            // stage('Deployment_start') {
+            //     steps {
+            //         script {
+            //             bat """
+            //                 @echo off
+            //                 setlocal
+
+            //                 REM Set BUILD_ID environment variable to avoid Jenkins killing the process
+            //                 set BUILD_ID=dontKillMe
+
+            //                 REM Trigger the scheduled task for Node.js
+            //                 schtasks /run /tn "DeploymentMaintenence_START"
+
+            //                 echo "Deployment Started successfully."
+
+            //                 REM End local environment block
+            //                 endlocal
+
+            //                 REM Exit script, Jenkins should now complete
+            //                 exit /b 0
+            //             """
+            //         }
+            //     }
+            // }
+
+            // stage('Service_start') {
+            //     steps {
+            //         script {
+            //             bat """
+            //                 @echo off
+            //                 setlocal
+
+            //                 REM Set BUILD_ID environment variable to avoid Jenkins killing the process
+            //                 set BUILD_ID=dontKillMe
+
+            //                 REM Trigger the scheduled task for Node.js
+            //                 schtasks /run /tn "Client-START"
+
+            //                 REM Trigger the scheduled task for Java
+            //                 schtasks /run /tn "Server-START"
+
+            //                 echo "HRMS Application Started successfully."
+
+            //                 REM End local environment block
+            //                 endlocal
+
+            //                 REM Exit script, Jenkins should now complete
+            //                 exit /b 0
+            //             """
+            //         }
+            //     }
+            // }
+    
+    }
+}

@@ -1,0 +1,286 @@
+//  The objective of this pipeline is to build the platform,module & deployment jar based on the inputs like Project,Build_Version, End_revision, Branch and  Module
+// Created on:15-01-2025
+// Updated on:23-01-2025
+// Created By: Dhananjaya K L (Junior_DevOps_Engineer)
+// Extended details about the pipeline is provided in the end of this file
+
+@Library("jenkins-shared-library") _ // If this pipeline script is using the shared library concept then this command is must, 
+
+pipeline {
+    agent {
+        // Mention the the Jenkins agent label which is configuredi nthe Jenkins console under nodes to execute this pipeline
+        // Plugin to be installed: SSH Agent Plugin
+        label 'JENKINS-AGENT'
+    }
+
+    options {
+        // This section will avoid cloning shared library repository to the target instance since the source files is being maintained in the other repository hence skipping the default checkout
+        skipDefaultCheckout(true)
+    }
+
+    parameters {
+        // This section used to configure the input to the pipeline
+        //note: the script for reactive input is provided in the Jenkins Console,  Ref link: https://github.com/ProGReC-APPS/jenkins-shared-library/tree/main/References
+        // Plugin to be installed: Active Choice Plug-in
+        choice(name: 'Project', choices: ['Server', 'Module', 'Deployment'], description: 'Select the Project to Build')
+        choice(name: 'Branch_Name', choices: ['main', 'development' ], description: 'Select the Branch to build')
+        string(name: 'Build_Version', defaultValue: '1.0', description: 'Select the Version to build')
+        string(name: 'End_Revision', defaultValue: 'HEAD', description: 'Select the End revision for build')
+
+    }
+
+    stages {
+        stage('Workspace_Setup') {
+            steps {
+                script {
+                    // Assign workspace directory based on the selected project name or modules name in the parameter section.
+                    if (params.Project == 'Module') {
+                        env.WorkspaceDirectory = params.Module_Type
+                        echo "Selected Module: ${params.Module_Type}"
+                    } else {
+                        env.WorkspaceDirectory = params.Project
+                        echo "Selected Project Type: ${params.Project}"
+                    }
+
+                    // Clean up the assigned workspace directory
+                    echo "Workspace directory: ${env.WorkspaceDirectory}"
+                    dir("${env.WorkspaceDirectory}") {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+
+
+        stage('Git_Checkout') {
+            steps {
+                script {
+                    dir("${env.WorkspaceDirectory}") {
+                    echo "Cloning repository based on Project parameter..."
+
+                    // Determine which repository to use based on "Project" parameter input
+                    switch (params.Project) {
+                        case 'Deployment':
+                            repo = "Deployment_Maintenance"
+                            break
+                        case 'Server':
+                            repo = "Server"                            
+                            break
+                        case 'Module':
+                            echo "Module selected. Prompting for sub-module..."
+                            switch (params.Module_Type) {
+                                case 'grc':
+                                    repo = "grc"
+                                    break
+                                case 'issue':
+                                    repo = "issue"
+                                    break
+                                case 'risk':
+                                    repo = "risk"
+                                    break
+                                case 'controltesting':
+                                    repo = "controltesting"
+                                    break
+                                case 'businessresilience':
+                                    repo = "businessresilience"
+                                    break
+                                case 'survey':
+                                    repo = "survey"
+                                    break
+                                case 'admin':
+                                    repo = "admin"
+                                    break
+                                case 'engine':
+                                    repo = "engine"
+                                    break
+                                case 'attendance':
+                                    repo = "attendance"
+                                    break
+                                case 'document':
+                                    repo = "document"
+                                    break
+                                case 'employee':
+                                    repo = "employee"
+                                    break
+                                case 'incident':
+                                    repo = "incident"
+                                    break
+                                case 'keyshield':
+                                    repo = "keyshield"
+                                    break
+                                case 'leave':
+                                    repo = "leave"
+                                    break
+                                case 'monitor':
+                                    repo = "monitor"
+                                    break
+                                case 'project':
+                                    repo = "project"
+                                    break
+                                case 'resolve':
+                                    repo = "resolve"
+                                    break
+                                case 'syscare':
+                                    repo = "syscare"
+                                    break
+                                case 'vendor':
+                                    repo = "vendor"
+                                    break
+                                case 'internalaudit':
+                                    repo = "internalaudit"
+                                    break
+                                case 'loss':
+                                    repo = "loss"
+                                    break
+                                case 'crm':
+                                    repo = "crm"
+                                    break
+                                case 'za':
+                                    repo = "za"
+                                    break                 
+                                default:
+                                    error "Unsupported SubModule parameter value: ${params.Module_Type}"
+                            }
+                            break
+                        default:
+                            error "Unsupported Project parameter value: ${params.Project}"
+                    }
+                    
+                    // Using the Git plugin to clone the repository
+                    //configure the credentials in the Jenkiins console and pass that here.
+                    sh """
+                    set +x
+                    
+                    mkdir ${env.WorkspaceDirectory}
+                    cd ${env.WorkspaceDirectory}
+                       """
+                    git branch: "${params.Branch_Name}", url: "https://github.com/ProGReC-APPS/${repo}.git", credentialsId: 'Github-ProGReC-APPS'
+                    sh "git checkout ${params.End_Revision}"
+                    echo "Finished Cloning Project: ${repo}"
+                    echo "Checkout out branch : ${params.Branch_Name}"
+                    echo "Checkout Revision: ${params.End_Revision}"
+                }
+                }
+            }
+        }
+
+        stage('Build_Project') { // This stage will build platform jar if server is selected in the input ,for deplyomynet maintenence it will build deployment jar 
+        // if the module is selected, script will look for the presence of pom.xml file in the server folder, if pom exists it builds jar if not proceed with the next stage.
+            steps {
+                script {
+                    sh """
+                        #!/bin/bash
+                        
+                        # To hide execution
+                        set +x 
+
+                        # Main logic
+                        if [ "${params.Project}" = "Server" ]; then
+                            echo "${params.Project}"
+                            cd "${params.Project}/platform/SERVER"
+                            mvn clean package
+                            echo "${params.Project} jar build success"
+
+                        elif [ "${params.Project}" = "Deployment" ]; then
+                            echo "${params.Project}"
+                            cd "${params.Project}"
+                            mvn clean package
+                            echo "${params.Project} jar build success"    
+
+                        elif [ "${params.Project}" = "Module" ]; then
+                            found=0
+                            echo "${params.Module_Type}"
+                            for file in "${params.Module_Type}/server/*"; do
+                                if [ \$(basename \$file) = "pom.xml" ]; then
+                                    found=1
+                                    break  # Stop after finding the first pom.xml
+                                fi
+                            done
+
+                            if [ \$found -ne 0 ]; then
+                                echo "Module code building"
+                                echo "Performing ${params.Module_Type}"
+                                cd "${params.Module_Type}/server"
+                                mvn clean package
+                                echo "${params.Module_Type} build success"
+                            else
+                                echo "No pom.xml found in the server directory"
+                            fi
+                        else
+                            echo "Invalid Project parameter value"
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('Nexus_Upload') { //This stage will upload the respective output jars like Module,Server & DeploymentMaintenene jar to the Nexus repository like Platform-Product-jars,external-jars
+            steps {
+                script {
+                withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                // Use environment variables instead of direct interpolation
+                
+                // Convert Module_Type to uppercase to make compatible with the external jar repository in Nexus
+                def UPPERCASE_MODULE_TYPE = params.Module_Type.toUpperCase()
+
+                    sh """
+                        #!/bin/bash
+                        
+                        set +x # To hide execution
+
+                        set -e  # Exit on any error
+
+                    
+                        # Main logic
+                        if [ "${params.Project}" = "Server" ]; then
+                            cd "${params.Project}/platform/SERVER/target"
+                            curl -s -u "\$USERNAME:\$PASSWORD" --upload-file "SERVER-jar-with-dependencies.jar" "https://rndnexus.progrec.com/repository/external-jars/com/progrecapps/SERVER-jar-with-dependencies/${Build_Version}/SERVER-jar-with-dependencies-1.0.jar"
+                            curl -s -u "\$USERNAME:\$PASSWORD" --upload-file "SERVER.jar" "https://rndnexus.progrec.com/repository/Platform-Product-jars/SERVER/${Build_Version}/SERVER.jar"
+                            echo "Uploaded Dependency jar to: https://rndnexus.progrec.com/repository/external-jars/com/progrecapps/SERVER-jar-with-dependencies/${Build_Version}/SERVER-jar-with-dependencies-1.0.jar"
+                            echo "Uploaded Platfomr-Server jar to: https://rndnexus.progrec.com/repository/Platform-Product-jars/SERVER/${Build_Version}/SERVER.jar"
+
+                        elif [ "${params.Project}" = "Deployment" ]; then
+                            cd "${params.Project}/target"
+                            curl -s -u "\$USERNAME:\$PASSWORD" --upload-file "DeploymentMaintenence-1.0.jar" "https://rndnexus.progrec.com/repository/DeploymentMaintenence/Deployment-Jar/${Build_Version}/DeploymentMaintenence-1.0.jar"
+                            cd ..
+                            curl -s -u "\$USERNAME:\$PASSWORD" --upload-file "deploymentscripts" "https://rndnexus.progrec.com/repository/DeploymentMaintenence/deploymentscripts/${Build_Version}/deploymentscripts"
+                            echo "Uploaded Deployment jar to: https://rndnexus.progrec.com/repository/DeploymentMaintenence/Deployment-Jar/${Build_Version}/DeploymentMaintenence-1.0.jar"
+                            echo "Uploaded Deployment scripts to: https://rndnexus.progrec.com/repository/DeploymentMaintenence/deploymentscripts/${Build_Version}/deploymentscripts"
+
+
+                        elif [ "${params.Project}" = "Module" ]; then
+                            echo "Module to be uploaded: ${params.Module_Type}"
+                            
+                            if [ -f "${params.Module_Type}/server/pom.xml" ]; then
+                                # pom.xml found, proceed with build
+                                cd "${params.Module_Type}/server/target"
+                                for jar in *.jar; do
+                                if [ -f "\$jar" ]; then  # Check if the file exists
+                                    echo "Uploading \$jar..."
+                                curl -s -u "\$USERNAME:\$PASSWORD" --upload-file "\$jar" "https://rndnexus.progrec.com/repository/Platform-Product-jars/${params.Module_Type}/${Build_Version}/\$jar"
+                                curl -s -u "\$USERNAME:\$PASSWORD" --upload-file "\$jar" "https://rndnexus.progrec.com/repository/external-jars/com/progrecapps/${params.Module_Type}/${UPPERCASE_MODULE_TYPE}/${Build_Version}/\$jar"
+                                echo "Uploaded Module jar to: https://rndnexus.progrec.com/repository/Platform-Product-jars/${params.Module_Type}/${Build_Version}/\$jar"
+                                echo "Uploaded Module jar to external-jars repo : https://rndnexus.progrec.com/repository/external-jars/com/progrecapps/${params.Module_Type}/${UPPERCASE_MODULE_TYPE}/${Build_Version}/\$jar"
+                                    break  # Exit the loop after uploading the first found jar
+                                fi
+                                done
+
+                            else
+                                # No pom.xml found
+                                ls -ltr "${params.Module_Type}/server/"
+                                echo "No jar found in the server directory"
+                            fi
+
+                        else
+                            echo "Invalid Project parameter value"
+                        fi
+
+                    """
+                }
+            }
+        }
+      }
+    }
+}
+
+// 1. Jenkins Console configuation Reference link: https://github.com/ProGReC-APPS/jenkins-shared-library/tree/main/References

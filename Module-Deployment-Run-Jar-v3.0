@@ -1,0 +1,246 @@
+@Library("jenkins-shared-library") _
+
+     // Define the method outside of the pipeline block
+    def getAgentLabel(environment) {
+    switch (environment.toLowerCase()) {
+        case 'agent-container':
+            return 'JENKINS-AGENT'
+        case 'testing-container':
+            return 'JENKINS-AGENT-SSH'
+        case 'testing-dev':
+            return 'TESTING-DEV'
+        case 'testing-qa':
+            return 'TESTING-QA'    
+        default:
+            error("Invalid environment specified: ${environment}")
+    }
+}
+
+pipeline {
+       
+
+  parameters {
+    // string(name: 'Build_Version', defaultValue: '1.0', description: 'Specify the version to build')
+    choice(
+        name: 'Environment',
+        choices: ['agent-container', 'testing-container', 'Testing-Dev', 'Testing-QA'],
+        description: 'Specify the environment: agent-container, testing-container, or redhat-VM'
+    )
+
+}
+
+     agent {
+        label getAgentLabel(params.Environment)
+    }
+
+    environment {
+        timestamp = new Date().format("dd-MM-yyyy_HH:mm:ss", TimeZone.getTimeZone('Asia/Kolkata'))
+    }
+
+    options {
+        // Set the custom checkout directory
+        skipDefaultCheckout(true)
+    }
+
+    stages {
+
+        stage('Stop_service') {
+            steps {
+                script {
+                    // Avoid failure by capturing the exit status of the shell script
+                    def stopNodeStatus = sh(
+                        script: """
+                            echo "${params.Environment}"
+                            echo "${env.timestamp}"
+                            # Check for running node services
+                            echo "Checking for running node processes..."
+                            
+                            # Find and kill node processes if they are running
+                            NODE_PID=\$(pgrep -f node)
+                            if [ -n "\$NODE_PID" ]; then
+                                echo "Node process found with PID: \$NODE_PID, killing it."
+                                kill -9 \$NODE_PID || echo "Failed to kill Node process, it might have already been stopped."
+                                echo "Node service stopped successfully."
+                            else
+                                echo "No node service running."
+                            fi
+                        """,
+                        returnStatus: true // Capture exit status
+                    )
+
+                    def stopJavaStatus = sh(
+                        script: """
+                            # Check for Java process running on port 8080
+                            echo "Checking for Java process running on port 8080..."
+                            JAVA_PID=\$(lsof -t -i:8080)
+
+                            if [ -n "\$JAVA_PID" ]; then
+                                echo "Java process found with PID: \$JAVA_PID running on port 8080, killing it."
+                                kill -9 \$JAVA_PID || echo "Failed to kill Java process, it might have already been stopped."
+                                echo "Java service stopped successfully."
+                            else
+                                echo "No Java service running on port 8080."
+                            fi
+                        """,
+                        returnStatus: true // Capture exit status
+                    )
+
+                    // Ensure the stage passes regardless of whether processes are found or not
+                    echo "Node stop status: ${stopNodeStatus}, Java stop status: ${stopJavaStatus}"
+                    echo "ProGRec Application Stopped successfully."
+                }
+            }
+        }
+
+
+        stage('Run_Deployment') {
+            steps {
+                script {
+                    // Get the current timestamp
+                    // def timestamp = sh(script: "date +'%Y-%m-%d_%H'", returnStdout: true).trim()
+
+                    // Start the Java application and redirect the output to a log file with a timestamp
+                    def result = sh(
+                        script: """
+                            #!/bin/bash
+                            echo "Waiting for 5 seconds..."
+                            sleep 10
+                            
+                            echo "${env.timestamp}"
+                            
+ 
+                            cd /HRMS/  # standard path
+                            # cd /home/master/Progrec/
+                            echo pwd
+                            ls
+                            echo "Starting DeploymentMaintenence-1.0.jar"
+                            mkdir -p Deployment_log
+                            nohup java -jar DeploymentMaintenence-1.0.jar > /HRMS/Deployment_log/deployment_${env.timestamp}.log 2>&1 & #standard script
+                            
+                           # nohup java -jar DeploymentMaintenence-1.0.jar > /home/master/Progrec/Deployment_log/deployment_${env.timestamp}.log 2>&1 &
+                            export APP_PID=\$!
+                            echo "DeploymentMaintenence-1.0.jar started with PID: \$APP_PID"
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    // Wait for a specific message in the log and display log contents in Jenkins dashboard
+                    timeout(time: 10, unit: 'MINUTES') {
+                        waitUntil {
+                             def logFile = "/HRMS/Deployment_log/deployment_${env.timestamp}.log"  // stadnard script path
+                           // def logFile = "/home/master/Progrec/Deployment_log/deployment_${env.timestamp}.log"
+                            def logContent = readFile(logFile)
+                            echo logContent // Display the log in Jenkins console output
+
+                            if (logContent =~ /(?i)ALL THE MODULES IMPORTED SUCCESSFULLY/) {
+                                echo 'ALL THE MODULES IMPORTED SUCCESSFULLY found in the log. Stopping the DeploymentMaintenence-1.0.jar...'
+
+                                // Find the process by PID and kill it
+                                sh """
+                                if [ -n "\$APP_PID" ]; then
+                                    echo "Killing process with PID: \$APP_PID"
+                                    kill -9 \$APP_PID
+                                else
+                                    echo "No process found with the specified PID"
+                                fi
+                                """
+
+                                echo 'Objects Import job finished, Please check the imports were successful'
+                                return true
+                            } else if (logContent =~ /ERROR:/) { //case sensitive
+                            // } else if (logContent =~ /(?i)dhananjay/) { //case insensitivity
+                                echo 'ERROR found in the log. Please check the application logs.'
+
+                                // Optionally, kill the Java process if an error is detected
+                                // sh """
+                                // if [ -n "\$APP_PID" ]; then
+                                //     echo "Killing process with PID: \$APP_PID due to error"
+                                //     kill -9 \$APP_PID
+                                // else
+                                //     echo "No process found with the specified PID"
+                                // fi
+                                // """
+
+                                error 'Deployment failed due to an error in the application'
+                                return false
+                            } else {
+                                return false
+                            }
+                        }
+                    }
+            
+            // Optionally, kill the Java process if it is still running after the timeout
+            // sh 'pkill -f DeploymentMaintenence-1.0.jar'
+                }
+            }
+        }
+
+stage('Report_Upload') {
+    steps {
+        script {
+            def Log_path = "/HRMS/Deployment_log/"  // standard path
+            def Report_path = "/HRMS/deploymentReports/"  // standard path
+            def Modulelist_file_path = "/HRMS/"
+            def timestamp = env.timestamp  // ensure this is defined beforehand
+            def time = new Date().format("dd-MM-yyyy", TimeZone.getTimeZone('Asia/Kolkata'))
+
+            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                sh """
+                    #!/bin/bash
+                    echo "Timestamp: ${timestamp}"
+
+                    # Upload the deployment log
+                    curl -u "\${USERNAME}:\${PASSWORD}" \\
+                        --upload-file "${Log_path}/deployment_${timestamp}.log" \\
+                        "https://rndnexus.progrec.com/repository/Deployment-reports/Logs/${params.Environment}/${time}/deployment_${timestamp}.log"
+
+                    # To write the modules to the txt file
+                    grep "Generated HTML report for module:" "${Log_path}/deployment_${timestamp}.log" | tr -d '\\r' | sed -E 's/.*module: ([a-zA-Z0-9_-]+).*/\\1/' > "${Modulelist_file_path}/Modules.txt"
+                    
+                    if [ -s "${Modulelist_file_path}/Modules.txt" ]; then
+                        while read -r module; do
+                         module_path="${Report_path}/\${module}"
+
+                    # Find all .html files and store them
+                    REPORT_DIR="\$module_path"
+                    FILES=\$(find "\$REPORT_DIR" -type f -name "*.html")
+
+                    # Function to extract relevant fields from the filename
+                    extract_date_time() {
+                        local file="\$1"
+                        # Extracting fields using regex to match dd-MM-yyyy_HH-mm
+                        echo "\$file" | awk -F'[_-]' '{ 
+                            # \$NF means Last field, \$NF-1 is the second last, etc.
+                            printf "%s %s %s %s %s\\n", \$(NF-2), \$(NF-3), \$(NF-4), \$(NF-1), \$NF
+                        }'
+                    }
+
+                    # Sort by descending order for yyyy, MM, dd, HH, mm
+                    latest_file=\$(for file in \$FILES; do
+                        # Extract date and time components
+                        date_time=\$(extract_date_time "\$file")
+                        # Combine for sorting YYYY MM DD HH MM based on above priority and include filename for easy sorting
+                        echo "\$date_time \$file"
+                    done | sort -nrk1,1 -k2,2nr -k3,3nr -k4,4nr -k5,5nr | head -n1 | awk '{print \$6}')
+
+                    # Output the latest file
+                    echo "Latest HTML Report for monitor: \$latest_file"
+
+                            if [ -n "\${latest_file}" ]; then
+                                echo "Uploading latest HTML report for module \${module}: \${latest_file}"
+                                curl -u "\${USERNAME}:\${PASSWORD}" --upload-file "\${latest_file}" \\
+                                    "https://rndnexus.progrec.com/repository/Deployment-reports/reports/${params.Environment}/\${module}/${time}/\$(basename \${latest_file})"
+                            else
+                                echo "No HTML report found for module: \${module}"
+                            fi
+                        done < "${Modulelist_file_path}/Modules.txt"
+                    else
+                        echo "No modules deployed. ${Modulelist_file_path}/Modules.txt is empty."
+                    fi
+                """
+            }
+        }
+    }
+}
+}
+}

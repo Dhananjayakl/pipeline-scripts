@@ -1,2 +1,2 @@
-# pipeline-scripts
-This repository contains the pipeline scripts and config files
+# jenkins-shared-library
+Jenkins files &amp; scripts are maintained in this repository

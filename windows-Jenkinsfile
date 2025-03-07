@@ -1,0 +1,145 @@
+@Library("jenkins-shared-library") _
+
+pipeline {
+    agent {
+        label 'Agent-241'
+    }
+
+    options {
+        // Set the custom checkout directory
+        skipDefaultCheckout(true)
+        checkoutToSubdirectory('D:\\Jenkins')
+    }
+
+    parameters {
+        string(name: 'Build_Version', defaultValue: '1.0', description: 'Specify thvendorcrme version to build')
+        string(name: 'Start_Revision', defaultValue: 'TAIL', description: 'Start revision for build')
+        string(name: 'End_Revision', defaultValue: 'HEAD', description: 'End revision for build')
+        string(name: 'Branch_Name', defaultValue: 'main', description: 'Branch to build')
+        choice(name: 'Module_Name', choices: ['grc', 'issue', 'risk', 'controltesting', 'businessresilience', 'survey', 'admin', 'engine', 'attendance', 'documentmanagment', 'employee', 'incident', 'keyshield', 'leave', 'monitor', 'project', 'resolve', 'syscare', 'vendor', 'internalaudit', 'loss', 'crm', 'za' ], description: 'Module to build')
+    }
+
+    environment {
+        grc_repo = 'https://github.com/ProGReC-APPS/grc.git'
+        issue_repo = 'https://github.com/ProGReC-APPS/issue.git'
+        risk_repo = 'https://github.com/ProGReC-APPS/risk.git'
+        controltesting_repo = 'https://github.com/ProGReC-APPS/controltesting.git'
+        businessresilience_repo = 'https://github.com/ProGReC-APPS/businessresilience.git'
+        survey_repo = 'https://github.com/ProGReC-APPS/survey.git'
+        admin_repo = 'https://github.com/ProGReC-APPS/admin.git'
+        engine_repo = 'https://github.com/ProGReC-APPS/engine.git'
+        attendance_repo = 'https://github.com/ProGReC-APPS/attendance.git'
+        documentmanagment_repo = 'https://github.com/ProGReC-APPS/documentmanagment.git'
+        employee_repo = 'https://github.com/ProGReC-APPS/employee.git'
+        incident_repo = 'https://github.com/ProGReC-APPS/incident.git'
+        keyshield_repo = 'https://github.com/ProGReC-APPS/keyshield.git'
+        leave_repo = 'https://github.com/ProGReC-APPS/leave.git'
+        monitor_repo = 'https://github.com/ProGReC-APPS/monitor.git'
+        project_repo = 'https://github.com/ProGReC-APPS/project.git'
+        resolve_repo = 'https://github.com/ProGReC-APPS/resolve.git'
+        syscare_repo = 'https://github.com/ProGReC-APPS/syscare.git'
+        vendor_repo = 'https://github.com/ProGReC-APPS/vendor.git'
+        internalaudit_repo = 'https://github.com/ProGReC-APPS/internalaudit.git'
+        loss_repo = 'https://github.com/ProGReC-APPS/loss.git'
+        crm_repo = 'https://github.com/ProGReC-APPS/crm.git'
+        za_repo = 'https://github.com/ProGReC-APPS/za.git'
+    }
+
+    stages {
+        stage('Workspace_Cleanup') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+
+        stage('Git_Repo_Clone') {
+            steps {
+                script {
+                    Git_Repo_Clone()
+                }
+            }
+        }
+
+        stage('Determine_Start_Revision') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        Determine_Start_Revision()
+                    }
+                }
+            }
+        }
+
+        stage('Git_Checkout') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        Git_Checkout()
+                    }
+                }
+            }
+        }
+
+        stage('Copy_Changes_to_Temp_Folder') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        Copy_Changes_to_temp_folder()
+                    }
+                }
+            }
+        }
+
+        stage('Create_Module_Folder_Structure') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        Create_Module_folder_structure()
+                    }
+                }
+            }
+        }
+        stage('JSON_update') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        JSON_update()
+                    }
+                }
+            }
+        }
+        stage('Build_Jar_and_Copy_Changes') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        Build_jar_copy_changes()
+                    }
+                }
+            }
+        }
+
+        stage('Zip_the_Module_Folder') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        Zip_the_module_folder()
+                    }
+                }
+            }
+        }
+
+        stage('Upload_to_Nexus') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        Upload_to_Nexus()
+                    }
+                }
+            }
+        }
+    }
+}

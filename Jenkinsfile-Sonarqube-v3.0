@@ -1,0 +1,442 @@
+//  The objective of this pipeline is to to scan using sonarscanner & update report to sonar server based on the inputs like Customer,Build_Version, Start_Revision, End Revision, Branch and  Module
+// Created on:15-01-2025
+// Updated on:23-01-2025
+// Created By: Dhananjaya K L (Junior_DevOps_Engineer)
+// Extended details about the pipeline is provided in the end of this file
+
+@Library("jenkins-shared-library") _ // IF this pipeline script is using the shared library concept then this command is must, 
+
+def Sonar_Project // Initialize Sonar_Project
+
+pipeline {
+    agent {
+        // Mention the the Jenkins agent label which is configuredi nthe Jenkins console under nodes to execute this pipeline
+        // Plugin to be installed: SSH Agent Plugin
+        label 'JENKINS-AGENT' 
+    }
+
+    options {
+        // This section will avoid cloning shared library repository to the target instance since the source files is being maintained in the other repository hence skipping the default checkout
+        skipDefaultCheckout(true)  
+    }
+
+    parameters {
+        // This section used to configure the input to the pipeline
+        //note: the script for reactive input is provided in the Jenkins Console,  Ref link: https://github.com/ProGReC-APPS/jenkins-shared-library/tree/main/References
+        // Plugin to be installed: Active Choice Plug-in
+        choice(name: 'Project', choices: ['Client', 'Server', 'Module'], description: 'Project to Scan')
+        choice(name: 'Branch_Name', choices: ['main', 'development', ], description: 'Branch to build')
+    }
+
+    environment {
+        // This section to define the environment to use that further in the repository
+        Sonar_Project = ''  // Empty initial value, will be set in script blocks, 
+        timestamp = new Date().format("dd-MM-yyyy_HH:mm:ss", TimeZone.getTimeZone('Asia/Kolkata')) //common timestamp ref used across the stages to avoid time differences in each stage
+
+    }
+
+    stages { // This stages block will have script related to the each stage.
+        stage('Workspace_Setup') { // This stage will define workspace directory based on the input since we are skipping the default checkout this stage is required
+    steps {
+        script {
+            // Assign workspace directory based on the selected project name or modules name in the parameter section.
+            if (params.Project == 'Module') {
+                env.WorkspaceDirectory = params.Module_Type
+                echo "Selected Module: ${params.Module_Type}"
+            } else {
+                env.WorkspaceDirectory = params.Project
+                echo "Selected Project Type: ${params.Project}"
+            }
+
+            // Clean up the assigned workspace directory
+            echo "Workspace directory: ${env.WorkspaceDirectory}"
+            dir("${env.WorkspaceDirectory}") {
+                cleanWs()
+            }
+			
+			// To determine which Soanr_project to use based on Project parameter
+                    switch (params.Project) {
+                        case 'Client':
+                            Sonar_Project = 'Client'
+                            break
+                        case 'Server':
+                            Sonar_Project = 'Server'
+                            break
+                        case 'Module':
+                            echo "Module selected. Prompting for sub-module..."
+                            switch (params.Module_Type) {
+                                case 'grc':
+                                    Sonar_Project = "grc"
+                                    break
+                                case 'issue':
+                                    Sonar_Project = "issue"
+                                    break
+                                case 'risk':
+                                    Sonar_Project = "risk"
+                                    break
+                                case 'controltesting':
+                                    Sonar_Project = "controltesting"
+                                    break
+                                case 'businessresilience':
+                                    Sonar_Project = "businessresilience"
+                                    break
+                                case 'survey':
+                                    Sonar_Project = "survey"
+                                    break
+                                case 'admin':
+                                    Sonar_Project = "admin"
+                                    break
+                                case 'engine':
+                                    Sonar_Project = "engine"
+                                    break
+                                case 'attendance':
+                                    Sonar_Project = "attendance"
+                                    break
+                                case 'document':
+                                    Sonar_Project = "document"
+                                    break
+                                case 'employee':
+                                    Sonar_Project = "employee"
+                                    break
+                                case 'incident':
+                                    Sonar_Project = "incident"
+                                    break
+                                case 'keyshield':
+                                    Sonar_Project = "keyshield"
+                                    break
+                                case 'leave':
+                                    Sonar_Project = "leave"
+                                    break
+                                case 'monitor':
+                                    Sonar_Project = "monitor"
+                                    break
+                                case 'project':
+                                    Sonar_Project = "project"
+                                    break
+                                case 'resolve':
+                                    Sonar_Project = "resolve"
+                                    break
+                                case 'syscare':
+                                    Sonar_Project = "syscare"
+                                    break
+                                case 'vendor':
+                                    Sonar_Project = "vendor"
+                                    break
+                                case 'internalaudit':
+                                    Sonar_Project = "internalaudit"
+                                    break
+                                case 'loss':
+                                    Sonar_Project = "loss"
+                                    break
+                                case 'crm':
+                                    Sonar_Project = "crm"
+                                    break
+                                case 'za':
+                                    Sonar_Project = "za"
+                                    break                
+                                default:
+                                    error "Unsupported SubModule parameter value: ${params.Module_Type}"
+                            }
+                            break
+                        default:
+                            error "Unsupported Project parameter value: ${params.Project}"
+                    }
+                }
+            }
+        }
+
+        stage('Git_Checkout') { //This stage will clone the repository & checksout selected branch in the input paramter
+            steps {
+                script {
+                    dir("${env.WorkspaceDirectory}") {
+
+                    echo "Cloning repository based on Module_Name parameter..."
+
+                    // Using the Git plugin to clone the repository
+                    //configure the credentials in the Jenkiins console and pass that here.
+                    git branch: "${params.Branch_Name}", url: "https://github.com/ProGReC-APPS/${WorkspaceDirectory}.git", credentialsId: 'Github-ProGReC-APPS'
+                    echo "Successfully Cloned Project: ${WorkspaceDirectory}"
+                    echo "Checkout out branch : ${params.Branch_Name}"
+                }
+                }
+            }
+        }
+
+        stage('Build_Project') { // This stage will build platform jar if server is selected in the input , 
+        // if the module is selected, script will look for the presence of pom.xml file in the server folder, if pom exists it builds jar if not proceed with the next stage.
+            steps {
+                script {
+                    sh """
+                        #!/bin/bash
+
+                        #Hide execution
+                        set +x
+
+                        # Main logic
+                        if [ "${params.Project}" = "Server" ]; then
+                            echo "Project: ${params.Project}"
+                            cd "${params.Project}/platform/SERVER"
+                            mvn clean package
+                            echo "${params.Project} jar build success"
+
+                        elif [ "${params.Project}" = "Module" ]; then
+                            found=0
+                            echo "${params.Module_Type}"
+                            for file in "${params.Module_Type}/server/*"; do
+                                if [ \$(basename \$file) = "pom.xml" ]; then
+                                    found=1
+                                    break  # Stop after finding the first pom.xml
+                                fi
+                            done
+
+                            if [ \$found -ne 0 ]; then
+                                echo "Module code building"
+                                echo "Performing ${params.Module_Type}"
+                                cd "${params.Module_Type}/server"
+                                mvn clean package
+                                echo "${params.Module_Type} jar build success"
+                                echo "proceeding with SonarQube Scanning...."
+                            else
+                                echo "No pom.xml found in the server directory,proceeding with SonarQube Scanning...."
+                            fi
+                        else
+                            echo "Invalid Project parameter value"
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('SonarQube_analysis') { 
+            // This stage will Scans the code, fetch the json report through API call from sonarQube server based on the created date, then generate the html report
+            // Plugin to be installed in master Jenkins: SonarQube Scanner for Jenkins 
+
+            steps {
+                script {
+                    dir("${env.WorkspaceDirectory}") {
+                        def currentDate = new Date().format("yyyy-MM-dd")
+                    echo "Current Date: ${currentDate}"
+                    echo "Sonar Project: ${Sonar_Project}"
+
+                    def date = new Date().format("yyyy-MM-dd_HH-mm")
+                    echo "${currentDate}"
+                    echo "${env.timestamp}"
+                    def outputHtmlPath = "${env.WorkspaceDirectory}-Sonar-${env.timestamp}.html"
+                    def jsonFilePath = "API.json"
+                    
+
+                    // Use the SonarQube scanner
+                    def scannerHome = tool 'SonarQube-Scanner' // Ensure this matches your installation
+                    withSonarQubeEnv('SonarQube_Server') { // The name you gave in Step 2
+                        // Run the SonarQube analysis
+                        // sh "${scannerHome}/bin/sonar-scanner -Dproject.settings=sonar-project.properties"
+                        sh """
+                        set +x
+                        echo "SonarQube scanning started....."
+                        ${scannerHome}/bin/sonar-scanner -Dproject.settings=sonar-project.properties"""
+                    }
+
+                    // Use withEnv to set environment variable for shell script
+                    withEnv(["Sonar_Project=${Sonar_Project}"]) {
+                        sh """
+                            #!/bin/bash
+                            
+                            #Hide execution
+                            set +x
+
+                            echo "Waiting for 2 seconds..."
+                            sleep 2
+
+                            # Define the SonarQube URL and token
+                             sonaruri="http://192.168.1.229:9011"
+                             token="sqa_79baf4356b44635732ba0bcea01487cfb9bda66e"
+
+                            # Define the current date and format it for URL
+                            currentDate=\$(date +'%Y-%m-%d')
+
+                            # Fetch the SonarQube project from environment variable
+                            sonarProject="\${Sonar_Project}"
+
+                            # Check and output the project
+                            if [ -z "\$sonarProject" ]; then
+                                echo "Sonar_Project environment variable is not set."
+                            else
+                                echo "Fetching data for project: \$sonarProject"
+                            fi
+
+                            # Curl command body without date filter
+                            body="components=\$sonarProject&s=FILE_LINE&createdAfter=\$currentDate&issueStatuses=CONFIRMED,OPEN&ps=500&facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&additionalFields=_all&timeZone=Asia/Calcutta"
+                            uri="\$sonaruri/api/issues/search?\$body"
+
+                            # Make the API call using curl
+                            response=\$(curl -s -H "Content-Type: application/json" -H "Authorization: Bearer \$token" "\$uri")
+
+                            # Define the path to the JSON file
+                            jsonFilePath="API.json"
+
+                            # Save the response to the JSON file
+                            echo "\$response" > "\$jsonFilePath"
+
+                            # Output the file path for verification
+                            echo "API response saved to: \$jsonFilePath"
+
+                            # Export variables for Node.js
+                            export currentDate="${currentDate}"
+                            export outputHtmlPath="${outputHtmlPath}"
+                            export jsonFilePath="${jsonFilePath}"
+                            
+
+                            # Check if JSON file exists
+                            if [ ! -f "\$jsonFilePath" ]; then
+                                echo "JSON file not found: \$jsonFilePath"
+                                exit 1
+                            fi
+
+                            # Run Node.js code to generate the report
+                            node -e '
+                            const fs = require("fs");
+
+                            // Load JSON file
+                            const jsonFilePath = process.env.jsonFilePath || "API.json";
+                            const currentDate = process.env.currentDate || new Date().toISOString().split("T")[0];
+                            let outputHtmlPath = process.env.outputHtmlPath || "123.html";
+
+                            // Function to generate HTML content
+                            function generateHtmlReport(issues) {
+                                const sonarQubeUrl = "http://192.168.1.229:9011";
+                                let htmlContent = "<html>" +
+                                    "<head>" +
+                                    "<title>Scan Report - " + currentDate + "</title>" +
+                                    "<style>" +
+                                    "body { font-family: Arial, sans-serif; color: #333; background-color: #f4f4f9; }" +
+                                    "h1 { color: #333; text-align: center; margin-bottom: 20px; font-size: 24px; }" +
+                                    "h2 { color: #333; margin-bottom: 20px; font-size: 24px; }" +
+                                    "table { width: 100%; border-collapse: collapse; border: 1px solid #000000; margin-bottom: 20px; }" +
+                                    "th, td { border: 1px solid #ddd; padding: 10px; text-align: left; max-width: 150px; word-wrap: break-word; }" +  // Add max-width and word-wrap to limit and wrap text
+                                    "th { background-color: #5D5CDA; color: white; font-size: 20px; }" +
+                                    "tr:nth-child(even) { background-color: #f9f9f9; }" +
+                                    "tr:hover { background-color: #f1f1f1; }" +
+                                    "a { color: #000000; text-decoration: underline; cursor: pointer; font-weight: bold; }" +
+                                    "a:hover { color: #333; text-decoration: underline; }" +
+                                    ".no-issues { text-align: center; font-size: 18px; color: #555; margin-top: 20px; }" +
+                                    "</style>"
+                                    +
+                                    "</head>" +
+                                    "<body>" +
+                                    "<h1>Scan Report </h1>" +
+                                    "<h2>Project Name - " + issues[0].project + "</h2>" +
+                                    "<h2>Created Date - " + issues[0].creationDate + "</h2>" +
+                                    "<table>" +
+                                    "<tr>" +
+                                    "<th>Key</th><th>Severity</th><th>Component</th>" +
+                                    "<th>Line</th><th>Message</th><th>Author</th><th>Update Date</th>" +
+                                    "<th>Status</th><th>Type</th>" +
+                                    "</tr>";
+
+                                for (let issue of issues) {
+                                    const issueUrl = sonarQubeUrl + "/project/issues?id=" + encodeURIComponent(issue.project) + "&issues=" + encodeURIComponent(issue.key);
+                                    htmlContent += "<tr>" +
+                                        "<td><a href=" + issueUrl + " target=_blank>" + issue.key + "</a></td>" +
+                                        "<td>" + issue.severity + "</td><td>" + issue.component + "</td>" +
+                                        "<td>" + (issue.line || "") + "</td><td>" + issue.message + "</td><td>" + (issue.author || "") + "</td>"+
+                                        "<td>" + (issue.updateDate || "") + "</td><td>" + issue.status + "</td><td>" + issue.type + "</td>" +
+                                        "</tr>";
+                                }
+
+                                htmlContent += "</table></body></html>";
+                                return htmlContent;
+                            }
+
+                            // Parse JSON data and filter issues
+                            try {
+                                const jsonData = JSON.parse(fs.readFileSync(jsonFilePath, "utf-8"));
+                                const issues = jsonData.issues.filter(issue => issue.creationDate && issue.creationDate.includes(currentDate));
+
+                                // Generate and write HTML report
+                                let htmlContent;
+                                if (issues.length > 0) {
+                                    htmlContent = generateHtmlReport(issues);
+                                } else {
+                                    htmlContent = "<html>" +
+                                        "<head><title>Scan Report - " + currentDate + "</title></head>" +
+                                        "<body><h1>Scan Report - " + currentDate + "</h1>" +
+                                        "<p class='no-issues'>There is no new issues created with this package,Refer SonarQube for older issues</p>" +
+                                        "</body></html>";
+                                }
+                                fs.writeFileSync(outputHtmlPath, htmlContent);
+                                console.log("HTML report written to " + outputHtmlPath);
+                            } catch (error) {
+                                console.error("Error processing JSON data:", error);
+                                process.exit(1);
+                            }
+                            '
+                        """
+                    }
+                    }
+                }
+            }
+        }
+
+
+        stage('Upload_Report') { //This stage will upload the scan report to the nexus & publsih the report in th e Jenkins console
+        // Plugin to be installed: HTML publisher plugin
+                steps {
+                    script {
+                        dir("${env.WorkspaceDirectory}") {
+                        
+                        def jsonFilePath = "API.json"
+                        def scanReportDir = "Scan_Report"
+                        def sonarHtmlReport = "${WorkspaceDirectory}-Sonar-${env.timestamp}.html"
+                        def reciever_mail = "dhananjaya.k@probuddysoftware.com"
+
+                        emailext(
+                            subject: "HTML Report from Jenkins Job: pipeline",
+                            body: """<p>Hi,</p>
+                                    <p>The HTML report for the job <b>${env.WorkspaceDirectory}</b> is attached.</p>
+                                    <p>Regards,<br>Jenkins</p>""",
+                            to: "${reciever_mail}",  // Email ID to which mail will be sent
+                            attachmentsPattern: "${sonarHtmlReport}",
+                            mimeType: 'text/html',
+                            
+                        )
+
+                        sh 'echo mail has been sent to \${reciever_mail}'
+
+                        withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        // Use environment variables instead of direct interpolation
+                        sh """
+                            set +x
+
+                            echo "TimeStamp: ${timestamp}"
+                            echo "Project: ${env.WorkspaceDirectory}"
+                            curl -s -u "\$USERNAME:\$PASSWORD" --upload-file "${env.WorkspaceDirectory}-Sonar-${env.timestamp}.html" "https://rndnexus.progrec.com/repository/Sonar-Reports/${env.WorkspaceDirectory}/${env.WorkspaceDirectory}-Sonar-${env.timestamp}.html"
+                            echo "SonarQube scan report link: https://rndnexus.progrec.com/repository/Sonar-Reports/${env.WorkspaceDirectory}/${env.WorkspaceDirectory}-Sonar-${env.timestamp}.html"
+                        """
+                        }
+                        
+                        sh """
+                            set +x
+
+                            mkdir -p ${scanReportDir}
+                            cp ${jsonFilePath} ${scanReportDir}/
+                            # cp htmlpublisher-wrapper.html ${scanReportDir}/
+                            cp ${sonarHtmlReport} ${scanReportDir}/
+                            """
+
+                            // Publish the HTML report
+                            publishHTML([
+                                allowMissing: false,
+                                alwaysLinkToLastBuild: false,
+                                keepAll: true,
+                                reportDir: scanReportDir,
+                                reportFiles: "${WorkspaceDirectory}-Sonar-${env.timestamp}.html",
+                                reportName: 'Scan Report',
+                                reportTitles: '',
+                                useWrapperFileDirectly: true    
+                            ])
+                    }
+                }
+            }
+        }
+    }
+}

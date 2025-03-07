@@ -1,0 +1,303 @@
+pipeline {
+
+    agent {
+        // Mention the the Jenkins agent label which is configuredi nthe Jenkins console under nodes to execute this pipeline
+        // Plugin to be installed: SSH Agent Plugin
+        label 'JENKINS-AGENT' 
+    }
+    
+    options {
+        // This section will avoid cloning shared library repository to the target instance since the source files is being maintained in the other repository hence skipping the default checkout
+        skipDefaultCheckout(true)  
+    }
+     
+    //  parameters {
+    //     // This section used to configure the input to the pipeline
+    //     //note: the script for reactive input is provided in the Jenkins Console,  Ref link: https://github.com/ProGReC-APPS/jenkins-shared-library/tree/main/References
+    //     // Plugin to be installed: Active Choice Plug-in
+    //     choice(name: 'Project', choices: ['Client', 'Server', 'Module'], description: 'Project to Scan')
+    //     choice(name: 'Branch_Name', choices: ['main', 'development', ], description: 'Branch to build')
+// }
+
+    environment {
+        // SONAR_PROJECT = "${Sonar_Project}" // Environment variable for SonarQube project
+        Sonar_Project = "grc" // Environment variable for SonarQube project
+        SONAR_URI = "http://192.168.1.229:9011" // SonarQube URL
+        SONAR_TOKEN = "sqa_79baf4356b44635732ba0bcea01487cfb9bda66e" // SonarQube token
+        API_JSON = "API.json" // Path to the JSON file
+        HTML_REPORT = "Report.html" // Path to the HTML report
+        PDF_REPORT = "Report.pdf" // Path to the PDF report
+    }
+
+    stages {
+        stage('Install Node.js and Dependencies') {
+            steps {
+                script {
+                    // Check and install Node.js if not already installed
+                    sh '''
+                        # Update package list
+                        apt-get update -y
+
+                        # Install Node.js and npm if not installed
+                        if ! command -v node &> /dev/null
+                        then
+                            echo "Node.js not found, installing..."
+                            curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+                            apt-get install -y nodejs
+                        else
+                            echo "Node.js is already installed."
+                        fi
+
+                        # Install required npm packages if not already installed
+                        if ! npm list json2html &> /dev/null
+                        then
+                            echo "Installing json2html..."
+                            npm install json2html
+                        else
+                            echo "json2html is already installed."
+                        fi
+
+                        if ! npm list puppeteer &> /dev/null
+                        then
+                            echo "Installing puppeteer..."
+                            npm install puppeteer
+                        else
+                            echo "puppeteer is already installed."
+                        fi
+                    '''
+                }
+            }
+        }
+        stage('Fetch SonarQube Report') {
+            steps {
+                withEnv(["Sonar_Project=${SONAR_PROJECT}"]) {
+                    sh '''
+                        #!/bin/bash
+
+                        # Hide execution
+                        set +x
+
+                        echo "Waiting for 2 seconds..."
+                        sleep 2
+
+                        # Define the current date and format it for the URL
+                        currentDate=$(date +'%Y-%m-%d')
+
+                        # Check and output the project
+                        if [ -z "$Sonar_Project" ]; then
+                            echo "Sonar_Project environment variable is not set."
+                            exit 1
+                        else
+                            echo "Fetching data for project: $Sonar_Project"
+                        fi
+
+                        # Curl command body to fetch all issues and final report
+                        body="components=$Sonar_Project&s=FILE_LINE&issueStatuses=CONFIRMED,OPEN&ps=500&additionalFields=_all&timeZone=Asia/Calcutta"
+                        uri="$SONAR_URI/api/issues/search?$body"
+
+                        # Make the API call using curl
+                        response=$(curl -s -H "Content-Type: application/json" -H "Authorization: Bearer $SONAR_TOKEN" "$uri")
+
+                        # Save the response to the JSON file
+                        echo "$response" > "$API_JSON"
+
+                        # Verify the JSON file
+                        if [ -s "$API_JSON" ]; then
+                            echo "API response saved to: $API_JSON"
+                        else
+                            echo "Failed to fetch data from SonarQube API."
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+        
+        stage('Generate HTML Report') {
+    steps {
+        script {
+            writeFile file: 'convert.js', text: '''
+                const fs = require('fs');
+                
+                // Read the JSON file
+                const data = JSON.parse(fs.readFileSync('API.json', 'utf-8'));
+
+                // Build an HTML table
+                const generateTable = (issues) => {
+                    return `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Key</th>
+                                    <th>Rule</th>
+                                    <th>Severity</th>
+                                    <th>Component</th>
+                                    <th>Line</th>
+                                    <th>Message</th>
+                                    <th>Author</th>
+                                    <th>Type</th>
+                                    <th>Effort</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${issues.map(issue => `
+                                    <tr>
+                                        <td>${issue.key}</td>
+                                        <td>${issue.rule}</td>
+                                        <td>${issue.severity}</td>
+                                        <td>${issue.component}</td>
+                                        <td>${issue.line}</td>
+                                        <td>${issue.message}</td>
+                                        <td>${issue.author}</td>
+                                        <td>${issue.type}</td>
+                                        <td>${issue.effort}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                };
+
+                // Generate HTML content
+                const html = `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>SonarQube Report</title>
+                        <style>
+                            body { font-family: Arial, sans-serif; margin: 20px; }
+                            h1 { text-align: center; color: #333; }
+                            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                            th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+                            th { background-color: #f4f4f4; }
+                            tr:nth-child(even) { background-color: #f9f9f9; }
+                        </style>
+                    </head>
+                    <body>
+                        <h1>SonarQube Report</h1>
+                        <p>Total Issues: ${data.total}</p>
+                        ${generateTable(data.issues)}
+                    </body>
+                    </html>
+                `;
+
+                // Write the HTML file
+                fs.writeFileSync('Report.html', html);
+                console.log('HTML report generated successfully: Report.html');
+            ''';
+
+            sh '''
+                # Install Node.js dependencies if not already installed
+                npm install json2html || true
+
+                # Run the Node.js script
+                node convert.js
+            '''
+        }
+    }
+}
+
+
+//         stage('Convert HTML to PDF') {
+//     steps {
+//         script {
+//             // Install missing dependencies
+//             sh '''
+//                  apt-get update
+//                  apt-get install -y libnspr4 libnss3 libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2
+//                  apt-get install -y libappindicator3-1 libatk-bridge2.0-0 libgtk-3-0 libgdk-pixbuf2.0-0
+//                  apt-get install -y dbus-x11
+//             '''
+
+//             // Convert the HTML to a PDF using Puppeteer
+//             writeFile file: 'convertToPdf.js', text: '''
+//                 const fs = require('fs');
+//                 const puppeteer = require('puppeteer');
+
+//                 (async () => {
+//                     // Log the files in the current directory
+//                     fs.readdir(__dirname, (err, files) => {
+//                         if (err) {
+//                             console.error('Error reading directory:', err);
+//                             process.exit(1);  // Exit if there's an error
+//                         }
+
+//                         console.log('Files in the current directory:', files);
+
+//                         // Check if Report.html exists in the directory
+//                         if (files.includes('Report.html')) {
+//                             console.log('Found Report.html, proceeding to load it.');
+
+//                             (async () => {
+//                                 // Launch Puppeteer with --no-sandbox to avoid issues running as root
+//                                 const browser = await puppeteer.launch({
+//                                     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--headless'],
+//                                     timeout: 900000,
+//                                     headless: true,
+//                                     dumpio: true
+//                                 });
+//                                 const page = await browser.newPage();
+
+//                                  // Set default timeouts
+//                                 await page.setDefaultNavigationTimeout(900000);
+//                                 await page.setDefaultTimeout(900000);
+
+//                                 // Set up request interception to block unnecessary resources
+//                                 await page.setRequestInterception(true);
+//                                 page.on('request', (request) => {
+//                                     if (['image', 'stylesheet', 'font'].includes(request.resourceType())) {
+//                                         request.abort();
+//                                     } else {
+//                                         request.continue();
+//                                     }
+//                                 });
+
+//                                 // Load the HTML file with increased timeout (60 seconds)
+//                                 await page.goto(`file://${__dirname}/Report.html`, { waitUntil: 'load', timeout: 900000 });
+
+//                                 // Convert the page to PDF
+//                                 await page.pdf({ path: 'Report.pdf', format: 'A4', timeout: 900000 });
+
+//                                 console.log('PDF report generated successfully: Report.pdf');
+
+//                                 // Close the browser
+//                                 await browser.close();
+//                             })();
+//                         } else {
+//                             console.error('Report.html not found in the current directory.');
+//                             process.exit(1);  // Exit if the file doesn't exist
+//                         }
+//                     });
+//                 })();
+//             '''; 
+
+//             // Run the Node.js script to convert HTML to PDF
+//             sh '''
+//                 # Run the Node.js script to convert HTML to PDF
+//                 node --max-old-space-size=8192 convertToPdf.js
+//             '''
+//         }
+//     }
+// }
+
+stage('report') {
+    steps {
+        script {
+            sh """
+            apt-get install -y wkhtmltopdf
+            wkhtmltopdf --page-width 600mm --page-height 210mm ./Report.html ./report.pdf
+            """
+        }
+    }
+}
+
+
+}
+
+    post {
+        always {
+            archiveArtifacts artifacts: '**/*.pdf, **/*.html, **/*.json', allowEmptyArchive: true
+            echo 'Reports archived successfully!'
+        }
+    }
+}

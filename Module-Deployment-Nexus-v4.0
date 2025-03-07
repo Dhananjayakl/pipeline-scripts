@@ -1,0 +1,247 @@
+//  The objective of this pipeline is to download the nexus package based on the inputs like Customer,Build_Version,Module and the instance.
+// Created on:24-01-2025
+// Updated on:24-01-2025
+// Created By: Dhananjaya K L (Junior_DevOps_Engineer)
+// Extended details about the pipeline is provided in the end of this file
+@Library("jenkins-shared-library") _ // IF this pipeline script is using the shared library concept then this command is must, 
+
+
+
+     // Define the method outside of the pipeline block
+    def getAgentLabel(environment) {
+    switch (environment.toLowerCase()) {
+        case 'agent-container-stagging':
+            return 'JENKINS-AGENT'
+        case 'testing-container-qa':
+            return 'JENKINS-AGENT-SSH'
+        case 'testing-dev':
+            return 'TESTING-DEV'
+        case 'testing-qa':
+            return 'TESTING-QA'            
+        default:
+            error("Invalid environment specified: ${environment}")
+    }
+}
+
+pipeline {
+
+  parameters {
+        // This section used to configure the input to the pipeline
+        //note: the script for reactive input is provided in the Jenkins Console,  Ref link: https://github.com/ProGReC-APPS/jenkins-shared-library/tree/main/References
+        // Plugin to be installed: Active Choice Plug-in
+    choice(name: 'Customer', choices: ['Progrec-APPS', 'AEON-Credit'], description: 'Select the target customer')
+    string(name: 'Build_Version', defaultValue: 'Latest', description: 'Specify the version to build')
+    
+}
+
+     agent {
+        // Mention the the Jenkins agent label which is configured in the Jenkins console under nodes to execute this pipeline
+        // Plugin to be installed: SSH Agent Plugin
+        label getAgentLabel(params.Environment)
+    }
+
+    options {
+         // This section will avoid cloning shared library repository to the target instance since the source files is being maintained in the other repository hence skipping the default checkout
+        // Set the custom checkout directory
+        skipDefaultCheckout(true)
+    }
+
+stages {     
+stage('Scan_Nexus') {
+    // This script will scan the presence of the packages i nthe Nexus repository based on the input if the package is not available the pipeline will get terminiated
+    steps {
+        script {
+            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                def modules = params.Module_Names.split(',')
+                modules.each { module ->
+                    module = module.trim()
+                    echo "Processing module: ${module}"
+
+                    if (module) {
+                        sh """
+                            
+                            #!/bin/bash
+
+                            #disable script execution log
+                            set +x
+                            
+                            NEXUS_URL="https://rndnexus.progrec.com"
+                            REPO="Module-Objects"
+
+                            if [ "${params.Build_Version}" = "Latest" ]; then
+                                echo "Build_Version is set to 'Latest'. Nexus package existence check."
+                                echo "${module}"
+
+                                echo "Fetching all versions for module: ${module}"
+                                RESPONSE=\$(curl -s -u \${USERNAME}:\${PASSWORD} \\
+                                    "\${NEXUS_URL}/service/rest/v1/search/assets?repository=\${REPO}&q=${params.Customer}/${module}" )
+                                
+                                
+                                VERSIONS=\$(echo "\$RESPONSE" | jq -r '.items[].path' | grep "${params.Customer}/${module}/" | grep '\\.zip\$' | awk -F'/' '{print \$NF}' | sort -V)
+                                
+                                
+                                LATEST_ZIP=\$(echo "\$VERSIONS" | tail -1)
+                                echo "Latest zip: \$LATEST_ZIP"
+
+                                if [ -n "\$LATEST_ZIP" ]; then
+                                    echo "Latest .zip file for module ${module}: \$LATEST_ZIP"
+                                else
+                                    echo "No .zip files found for module ${module}."
+                                    exit 1
+                                fi
+                                
+                                # Extracting the version
+                                LATEST_VERSION=\$(echo "\$LATEST_ZIP" | sed -E 's/.*-([0-9.]+)\\.zip/\\1/')
+                                echo "Extracted version: \$LATEST_VERSION"
+                                
+                            else
+                                PACKAGE_NAME="${params.Customer}/${module}/${params.Build_Version}/${module}-${params.Build_Version}.zip"
+                                echo "\$PACKAGE_NAME"
+                                
+                                EXISTING_PACKAGE=\$(curl -s -u \$USERNAME:\$PASSWORD \\
+                                    "\$NEXUS_URL/service/rest/v1/search/assets?repository=\$REPO&q=\$PACKAGE_NAME" | \\
+                                    jq '.items[] | select(.path | contains("'"\$PACKAGE_NAME"'"))')
+                                
+                                if [ -n "\$EXISTING_PACKAGE" ]; then
+                                    echo "Package \$PACKAGE_NAME exists in Nexus. Continue Download the package in the subsequent stage."
+                                    exit 0
+                                else
+                                    echo "Package \$PACKAGE_NAME does not exist."
+                                    echo "Exact package does not exist in Nexus.please recheck the input or nexus repository"
+                                    exit 1
+                                fi
+                            fi
+                        """
+
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+        
+
+        stage('Nexus_Download') { // this stage will download all the packages from the Nexus based on the input provided.
+            steps {
+                script {
+                       sh """
+                            #!/bin/bash
+
+                            #disable script execution log
+                            set +x
+
+                            # Define the destination directory
+                            destinationDir="/HRMS/exportFiles" #stadnard path
+
+                            # Check if the destination directory exists
+                            if [ -d "\$destinationDir" ]; then
+                                echo "Directory exists. Replacing existing modules in target isntance with the new module package \$destinationDir..."
+                                
+                                # Remove all files and folders except deploymentscripts.zip
+                               #find "\$destinationDir" -mindepth 1 ! -name 'deploymentscripts.zip' -exec rm -rf {} +
+                            else
+                                echo "Directory does not exist. Creating the directory..."
+                                mkdir -p "\$destinationDir"
+                            fi
+                        """
+                    def modules = params.Module_Names.split(',')
+                    modules.each { module ->
+                        // Trim whitespace from module name
+                        module = module.trim()
+                        echo "Processing module: ${module}"
+
+                        // Check if the module is not empty
+                        if (module) {
+                        sh """
+                            #!/bin/bash
+
+                            #disbale logging
+                            set +x
+
+                            NEXUS_URL="https://rndnexus.progrec.com"
+                            REPO="Module-Objects"
+
+                            # Define the destination directory
+                            destinationDir="/HRMS/exportFiles" #stadnard path
+                            # destinationDir="/home/master/Progrec/exportFiles"
+
+                            if [ "${params.Build_Version}" = "Latest" ]; then
+                                echo "Build_Version is set to 'Latest'. Nexus package existence check."
+                                echo "${module}"
+
+                                echo "Fetching all versions for module: ${module}"
+                                RESPONSE=\$(curl -s -u \${USERNAME}:\${PASSWORD} \\
+                                    "\${NEXUS_URL}/service/rest/v1/search/assets?repository=\${REPO}&q=${params.Customer}/${module}" )
+                                
+                                
+                                VERSIONS=\$(echo "\$RESPONSE" | jq -r '.items[].path' | grep "${params.Customer}/${module}/" | grep '\\.zip\$' | awk -F'/' '{print \$NF}' | sort -V)
+                                
+                                
+                                LATEST_ZIP=\$(echo "\$VERSIONS" | tail -1)
+                                echo "Latest zip: \$LATEST_ZIP"
+
+                                if [ -n "\$LATEST_ZIP" ]; then
+                                    echo "Latest .zip file for module ${module}: \$LATEST_ZIP"
+                                else
+                                    echo "No .zip files found for module ${module}."
+                                    exit 1
+                                fi
+                                
+                                # Extracting the version
+                                LATEST_VERSION=\$(echo "\$LATEST_ZIP" | sed -E 's/.*-([0-9.]+)\\.zip/\\1/')
+                                echo "Extracted version: \$LATEST_VERSION"
+
+                                #Delete existing modules fromthe export fodler in target location
+                                rm -rf \${destinationDir}/${module}-*.zip
+
+                                # Define the Nexus repository URL and structure
+                                nexusUrl="https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}"
+                                fileUrl="\$nexusUrl/${module}/\$LATEST_VERSION/${module}-\$LATEST_VERSION.zip"
+
+                                # Define the destination path for the downloaded file
+                                destinationPath="\$destinationDir/${module}-\$LATEST_VERSION.zip"
+
+                                # Download the file using curl
+                                echo "Downloading \$fileUrl..."
+                                curl -o "\$destinationPath" "\$fileUrl"
+
+                                # Check if the download was successful
+                                if [ -f "\$destinationPath" ]; then
+                                    echo "File downloaded successfully to \$destinationPath"
+                                else
+                                    echo "Failed to download the file. Please check the module name and version."
+                                fi
+
+                        else 
+                            #Delete existing modules fromthe export fodler in target location
+                                rm -rf \${destinationDir}/${module}-*.zip
+
+                                # Define the Nexus repository URL and structure
+                                nexusUrl="https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}"
+                                fileUrl="\$nexusUrl/${module}/${Build_Version}/${module}-\$Build_Version.zip"
+
+                                # Define the destination path for the downloaded file
+                                destinationPath="\$destinationDir/${module}-\$Build_Version.zip"
+
+                                # Download the file using curl
+                                echo "Downloading \$fileUrl..."
+                                curl -o "\$destinationPath" "\$fileUrl"
+
+                                # Check if the download was successful
+                                if [ -f "\$destinationPath" ]; then
+                                    echo "File downloaded successfully to \$destinationPath"
+                                else
+                                    echo "Failed to download the file. Please check the module name and version."
+                                fi
+                                fi
+                                """
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+}

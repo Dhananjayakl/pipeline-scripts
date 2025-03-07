@@ -1,0 +1,214 @@
+@Library("jenkins-shared-library") _
+
+pipeline {
+    agent {
+        label 'JENKINS-AGENT'
+        // label ' JENKINS-AGENT-229-24'
+       
+    }
+
+    options {
+        // Set the custom checkout directory
+        skipDefaultCheckout(true)
+        //  checkoutToSubdirectory('/home/workspace/')
+    }
+
+    parameters {
+        string(name: 'Build_Version', defaultValue: '1.0', description: 'Specify the Version to build')
+        string(name: 'Start_Revision', defaultValue: 'TAIL', description: 'Specify the Start revision to build')
+        string(name: 'End_Revision', defaultValue: 'HEAD', description: 'Specify the End revision for build')
+        // string(name: 'Branch_Name', defaultValue: 'main', description: 'Branch to build')
+        choice(name: 'Branch_Name', choices: ['main', 'development', ], description: 'Branch to build')
+        choice(name: 'Module_Name', choices: ['grc', 'issue', 'risk', 'controltesting', 'businessresilience', 'survey', 'admin', 'engine', 'attendance', 'document', 'employee', 'incident', 'keyshield', 'leave', 'monitor', 'project', 'resolve', 'syscare', 'vendor', 'internalaudit', 'loss', 'crm', 'za' ], description: 'Module to build')
+    }
+
+    stages {
+        stage('Workspace_Cleanup') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+
+        stage('Git_Repo_Clone') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                    echo "Cloning repository based on Module_Name parameter..."
+
+                    // Using the Git plugin to clone the repository
+                    git branch: "${params.Branch_Name}", url: "https://github.com/ProGReC-APPS/${Module_Name}.git", credentialsId: 'Github-ProGReC-APPS'
+                }
+                }
+            }
+        }
+
+        stage('Determine_Start_Revision') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                    if (params.Start_Revision == 'TAIL') {
+                        def Initial_commit = sh(script: 'git rev-list --max-parents=0 HEAD', returnStdout: true).trim()
+                        env.Start_Revision = Initial_commit
+                    } else {
+                        env.Start_Revision = params.Start_Revision
+                    }
+                    echo "Revision: ${env.Start_Revision}"
+                }
+                }
+            }
+        }
+
+        stage('Git_Checkout') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        sh """
+                            git checkout ${params.Branch_Name}
+                            git checkout ${params.End_Revision}
+                            git diff --name-only ${env.Start_Revision} ${params.End_Revision} > diff_list.txt
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Create_Module_Folder_Structure') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                        sh """
+                            mkdir -p ${params.Module_Name}/client ${params.Module_Name}/objects ${params.Module_Name}/scripts/pre ${params.Module_Name}/scripts/post ${params.Module_Name}/server
+                        """
+                    }
+                }
+            }
+        }
+
+        // stage('Copy_Changes_to_Temp_Folder') {
+        //     steps {
+        //         script {
+        //             dir("${params.Module_Name}") {
+        //                 sh """
+        //                     # cat diff_list.txt | grep -v '.gitignore' | grep -v '^server/' | xargs -I{} cp --parents {} ${params.Module_Name}
+        //                       cat diff_list.txt | grep -v '.gitignore' | grep -v '^server/' | grep -v 'sonar-project.properties' | xargs -I{} cp --parents {} ${params.Module_Name}
+
+        //                 """
+        //             }
+        //         }
+        //     }
+        // }
+
+stage('Copy_Changes_to_Temp_Folder') {
+    steps {
+        script {
+            dir("${params.Module_Name}") {
+                sh """
+                    # Initialize the ignored files log
+                    > not_existing_files.txt
+
+                    # Iterate over each file in diff_list.txt
+                    while IFS= read -r file; do
+                        # Skip unwanted files
+                        case "\$file" in
+                            '.gitignore'|*sonar-project.properties|server/*)
+                                continue
+                                ;;
+                        esac
+
+                        # Check if the file exists
+                        if [ -f "\$file" ]; then
+                            # Copy the file with its parent directory structure
+                            cp --parents "\$file" ${params.Module_Name}
+                        else
+                            # Log the missing file
+                            echo "\$file" >> not_existing_files.txt
+                        fi
+                    done < diff_list.txt
+
+                    echo "Copy completed. Ignored files are listed in not_existing_files.txt."
+                """
+            }
+        }
+    }
+}
+
+
+        stage('JSON_Update') {
+            steps {
+                script {
+                    def jsonFilePath = "${pwd()}/report.json"
+                    def module = params.Module_Name
+                    def version = params.Build_Version
+                    def currentTime = new Date().format("yyyy-MM-dd'T'HH:mm:ss.SSSZ", TimeZone.getTimeZone('Asia/Kolkata'))
+                    
+                    def jsonContent = """
+                    {
+                        "Module_Name": "${module}",
+                        "Build_Version": "${version}",
+                        "Time": "${currentTime}"
+                    }
+                    """
+                    
+                    writeFile file: jsonFilePath, text: jsonContent
+                }
+            }
+        }
+
+        stage('Build_Jar_and_Copy_Changes') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                     // Check for server files in diff_list.txt
+                    def serverFilesFound = sh(script: "grep -q '^server/' diff_list.txt", returnStatus: true)
+
+                    if (serverFilesFound == 0) {
+                        // If grep found server files (exit code 0), execute the build commands
+                        sh """
+                            if [ -f server/pom.xml ]; then
+                                cd server && mvn package && cd ..
+                                mv server/target/*.jar ${params.Module_Name}/server/${params.Module_Name}.jar
+                            else
+                                echo "No POM file exists in server"
+                            fi
+                        """
+                    } else {
+                        // If no server files are found, log the message
+                        echo "No changes in server"
+                    }
+                    }
+                }
+            }
+        }
+
+        stage('Zip_the_Module_Folder') {
+            steps {
+                script {
+                    dir("${params.Module_Name}") {
+                    sh """
+                    zip -r ${params.Module_Name}-${params.Build_Version}.zip ${params.Module_Name}
+                    """
+                    }
+                }
+            }
+        }
+
+        stage('Upload_to_Nexus') {
+            steps {
+                script {
+                        dir("${params.Module_Name}") {
+                            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                                // Use environment variables instead of direct interpolation
+                                sh """
+                                    curl -u "\$USERNAME:\$PASSWORD" --upload-file "${params.Module_Name}-${params.Build_Version}.zip" "https://rndnexus.progrec.com/repository/Module-Objects/${params.Module_Name}/${params.Module_Name}-${params.Build_Version}.zip"
+                                """
+                        }
+                    }
+                }
+            }        
+        }
+    }
+}

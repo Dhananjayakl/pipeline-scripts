@@ -1,0 +1,153 @@
+// properties([
+//     parameters([
+//         [$class: 'ChoiceParameter', 
+//             choiceType: 'PT_SINGLE_SELECT', 
+//             description: 'Select the Env Name from the Dropdown List', 
+//             filterLength: 1, 
+//             filterable: true, 
+//             name: 'Env', 
+//             randomName: 'choice-parameter-5631314439613978', 
+//             script: [
+//                 $class: 'GroovyScript', 
+//                 fallbackScript: [
+//                     classpath: [], 
+//                     sandbox: false, 
+//                     script: 
+//                         'return[\'Could not get Env\']'
+//                 ], 
+//                 script: [
+//                     classpath: [], 
+//                     sandbox: false, 
+//                     script: 
+//                         'return["Dev","QA","Stage","Prod"]'
+//                 ]
+//             ]
+//         ], 
+//         [$class: 'CascadeChoiceParameter', 
+//             choiceType: 'PT_SINGLE_SELECT', 
+//             description: 'Select the Server from the Dropdown List', 
+//             filterLength: 1, 
+//             filterable: true, 
+//             name: 'Server', 
+//             randomName: 'choice-parameter-5631314456178619', 
+//             referencedParameters: 'Env', 
+//             script: [
+//                 $class: 'GroovyScript', 
+//                 fallbackScript: [
+//                     classpath: [], 
+//                     sandbox: false, 
+//                     script: 
+//                         'return[\'Could not get Environment from Env Param\']'
+//                 ], 
+//                 script: [
+//                     classpath: [], 
+//                     sandbox: false, 
+//                     script: 
+//                         ''' if (Env.equals("Dev")){
+//                                 return["d1","d2"]
+//                             }
+//                             else if(Env.equals("QA")){
+//                                 return["q1","q2","q3"]
+//                             }
+//                             else if(Env.equals("Stage")){
+//                                 return["s1","s2","s3"]
+//                             }
+//                             else if(Env.equals("Prod")){
+//                                 return["p1","p2","p3"]
+//                             }
+//                         '''
+//                 ]
+//             ]
+//         ]
+//     ])
+// ])
+
+// pipeline {
+//     // environment {
+//     //     vari = ""
+//     // }
+//     agent {
+//         label 'JENKINS-AGENT'
+//     }
+
+//     stages {
+//         stage("Example") {
+//             steps {
+//                 script {
+//                     echo 'Hello'
+                    
+//                     // Create a list to keep track of selected environments and servers
+//                     def envServerMap = [:]
+                    
+//                     // Fill the map with selected environment and corresponding server
+//                     envServerMap[params.Env] = params.Server
+
+//                     // Echo the selected environments and servers one by one
+//                     envServerMap.each { env, server ->
+//                         echo "Selected Environment: ${env}"
+//                         echo "Selected Server: ${server}"
+//                     }
+
+//                     // Validate the selected server
+//                     if (params.Server.equals("Could not get Environment from Env Param")) {
+//                         echo "Must be the first build after Pipeline deployment. Aborting the build"
+//                         currentBuild.result = 'ABORTED'
+//                         return
+//                     }
+
+//                     echo "Crossed param validation"
+//                 }
+//             }
+//         }
+//     }
+// }
+
+// properties([
+//             [
+//             $class: 'RebuildSettings', autoRebuild: false, rebuildDisabled: false],
+//             parameters
+//             (
+//                 [
+//                     choice(choices: ['opt1', 'opt2', 'opt3'], description: 'desc', name: 'bla'),
+//                     choice(choices: script{return_list()}, description: 'some letter', name: 'ble')
+//                 ]
+//         )
+//     ]
+//  )
+
+properties([
+            [
+            $class: 'RebuildSettings', autoRebuild: false, rebuildDisabled: false],
+            parameters
+            (
+                [
+                    choice(choices: ['opt1', 'opt2', 'opt3'], description: 'desc', name: 'bla'),
+                    choice(choices: script{return_list()}, description: 'some letter', name: 'ble')
+                ]
+        )
+    ]
+ )
+
+pipeline {
+    agent{
+        label "JENKINS-AGENT"
+    }
+
+    stages{
+        stage("frist"){
+            steps{
+                echo "${params.bla}"
+                echo "${params.ble}"
+            }
+        }
+    }
+}
+
+def return_list(){
+    if ("${JOB_NAME}".contains("bla")){
+        env.list_users = "1\n 2\n 3\n"
+    }else{
+        env.list_users = "a\n b\n c\n"
+    }
+    return env.list_users
+}

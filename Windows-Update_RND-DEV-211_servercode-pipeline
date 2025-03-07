@@ -1,0 +1,85 @@
+@Library("jenkins-shared-library") _
+
+pipeline {
+    agent {
+        label 'Agent-211'
+    }
+triggers {
+        githubPush()
+    }
+
+    options {
+        // Set the custom checkout directory
+        skipDefaultCheckout(true)
+        //  checkoutToSubdirectory('/home/workspace/')
+    }
+
+    stages {
+        stage('Check Branch and Checkout') {
+            steps {
+                script {
+                    // Get the name of the branch that triggered the push
+                    def branchName = env.GIT_BRANCH
+                    echo "Triggered by branch: ${branchName}"
+
+                    // Only proceed if the branch is 'development'
+                    if (branchName != 'refs/heads/development') {
+                        echo "This job is only triggered for changes in the development branch. Exiting."
+                        currentBuild.result = 'SUCCESS'
+                        return // Exit the pipeline
+                    }
+
+                    // Proceed with the rest of the stages if the branch is 'development'
+                    checkout scm  // Checkout the code from the GitHub repository
+                }
+            }
+        }
+
+        stage('Code_Update') {
+            steps {
+                script {
+                    dir('D:\\test\\server') {
+                        bat """
+                            @echo off
+                            REM Navigate to the specified location
+                            cd /d "D:/test/server"
+
+                            REM Check the current branch
+                            git branch > branch.txt
+                            findstr /C:"* development" branch.txt > nul
+
+                            IF %ERRORLEVEL% EQU 0 (
+                                REM If the current branch is development, pull the latest changes
+                                echo Current branch is development, pulling latest changes...
+                                git pull origin development
+                            ) ELSE (
+                                REM If not, checkout the development branch
+                                echo Current branch is not development, checking out development branch...
+                                git checkout origin development
+                                git branch > branch.txt
+                                findstr /C:"* development" branch.txt > nul
+
+                                IF %ERRORLEVEL% EQU 0 (
+                                    REM If branch is now development, pull the latest changes
+                                    echo Switched to development branch, pulling latest changes...
+                                    git pull origin development
+                                ) ELSE (
+                                    echo Failed to switch to development branch
+                                    exit /b 1
+                                )
+                            )
+
+                            REM Success message
+                            echo 211 server updated successfully
+
+                            REM Clean up temporary file
+                            del branch.txt
+
+                        """
+                    }
+                }
+            }
+        }
+
+    }
+}

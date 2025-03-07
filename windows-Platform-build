@@ -1,0 +1,435 @@
+@Library("jenkins-shared-library") _
+
+pipeline {
+    agent {
+        label 'Agent-249'
+        // Agent-241
+         // Agent-249
+         //Local
+    }
+
+    options {
+        // Set the custom checkout directory
+        skipDefaultCheckout(true)
+    }
+
+    parameters {
+       // string(name: 'Build_Version', defaultValue: '2.0', description: 'Specify the version to build')
+       // string(name: 'Start_Revision', defaultValue: 'TAIL', description: 'Start revision for build')
+       // string(name: 'End_Revision', defaultValue: 'HEAD', description: 'End revision for build')
+        string(name: 'Branch_Name', defaultValue: 'main', description: 'Branch to build')
+        choice(name: 'Platform_Type', choices: ['Client', 'Server'], description: 'Platform to build')
+    }
+
+    environment {
+        Client_repo = 'https://github.com/ProGReC-APPS/Client.git'
+        Server_repo = 'https://github.com/ProGReC-APPS/Server.git'
+    }
+
+      stages {
+        stage('Delete_Rollback_folder') { //To make Rollback-Platform pipeline work seamlesly this stage is introduced
+            steps {
+                script {
+                bat """
+                    cd /D D:/HRMS/
+
+                    IF EXIST Client-Rollback (
+                        rmdir /S /Q Client-Rollback
+                    )
+                    
+                    IF EXIST Server-Rollback (
+                        rmdir /S /Q Server-Rollback
+                    )
+                """
+                }
+            }
+        }
+
+
+        stage('Workspace_Cleanup') {
+            steps {
+                script {
+                    dir("${params.Platform_Type}") {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+
+        stage('Git_Repo_Clone') {
+            steps {
+                      script {
+                    echo "Cloning repository based on Module_Name parameter..."
+                    def repoUrl
+
+                    // Determine which repository URL to use based on Module_Name parameter
+                    switch (params.Platform_Type) {
+                        case 'Client':
+                            repoUrl = env.Client_repo
+                            break
+                        case 'Server':
+                            repoUrl = env.Server_repo
+                            break   
+                        default:
+                            error "Unsupported Module_Name parameter value: ${params.Module_Name}"
+                    }
+                    // Clone the selected repository   
+                    bat """                 
+                    if exist ${params.Platform_Type} (
+                    rd /s /q ${params.Platform_Type}
+                    )
+                    git clone ${repoUrl}
+                    cd /d "%~dp0"
+                    """
+                }                
+            }
+        }
+
+        stage('Update_files') {
+            steps {
+                script {
+                    dir("${params.Platform_Type}") {
+                        bat """
+                        @echo off
+                        setlocal enabledelayedexpansion
+
+                        REM Change directory to script's directory
+                        
+                        if /I "${Platform_Type}"=="Client" (
+                            echo Updating Client files...
+                            copy /Y "D:\\HRMS\\Template\\AxiosInstance.js" "D:\\HRMS\\workspace\\Platform-Build-Deploy\\Client\\src\\utils\\AxiosInstance.js" || (
+                                echo Failed to copy AxiosInstance.js
+                                exit /b 1
+                            )
+                            copy /Y "D:\\HRMS\\Template\\package.json" "D:\\HRMS\\workspace\\Platform-Build-Deploy\\Client\\package.json" || (
+                                echo Failed to copy package.json
+                                exit /b 1
+                            )
+                            copy /Y "D:\\HRMS\\Template\\vite.config.js" "D:\\HRMS\\workspace\\Platform-Build-Deploy\\Client\\vite.config.js" || (
+                                echo Failed to copy vite.config.js
+                                exit /b 1
+                            )
+                            echo Client files replaced successfully. 
+                        
+                        ) else if /I "${Platform_Type}"=="Server" (
+                            echo Updating Server files...
+                            copy /Y "D:\\HRMS\\Template\\application.yml" "D:\\HRMS\\workspace\\Platform-Build-Deploy\\Server\\platform\\SERVER\\src\\main\\resources" || (
+                                echo Failed to copy application.yml
+                                exit /b 1
+                            )
+                            echo Server file replaced successfully.
+                        
+                        ) else (
+                            echo Invalid Platform_Type specified.
+                            exit /b 1
+                        )
+
+                        endlocal
+                        exit /b
+                        """
+                    }
+                }
+            }
+        }
+
+    
+        stage('Build/npm install') {
+            steps {
+                script {
+                    bat """
+                        @echo off
+                        REM Main logic
+                        cd D:/HRMS/workspace/Platform-Build-Deploy/${params.Platform_Type}
+                        echo "${params.Platform_Type}"
+                        if /I "${params.Platform_Type}"=="Client" (
+                            echo Installing node modules
+                            echo Performing npm install
+                            cd ${params.Platform_Type}
+                            npm install
+                        ) else if /I "${params.Platform_Type}"=="Server" (
+                            echo Maven building
+                            echo Performing maven build
+                            cd platform/SERVER
+                            mvn clean package
+                            echo "Module jar build success"
+                        ) else (
+                            echo Unsupported Project parameter value
+                        )
+                        cd /d "%~dp0"
+                    """
+                }
+            }
+        }
+
+stage('Backup-Copy-Rename') {
+    steps {
+        script {
+            def platformType = params.Platform_Type.toLowerCase()
+
+            if (platformType == "client") {
+                def result = bat(
+                    script: """
+                    REM @echo off
+                    cd D:/HRMS/workspace/Platform-Build-Deploy/
+                    rename ${params.Platform_Type} ${params.Platform_Type}-temp
+                    robocopy D:/HRMS/workspace/Platform-Build-Deploy/${params.Platform_Type}-temp "D:/HRMS/${params.Platform_Type}-temp" /E
+                    """,
+                    returnStatus: true
+                )
+
+                if (result != 0 && result != 1 && result != 3) {
+                    error "Robocopy failed with exit code ${result}"
+                }
+            } else if (platformType == "server") {
+                def result = bat(
+                    script: """
+                    echo "Copying the Server-temp.jar to HRMS folder"
+                    cd D:/HRMS
+                    mkdir Server-temp
+                    robocopy "D:/HRMS/workspace/Platform-Build-Deploy/Server/platform/SERVER/target" "D:/HRMS/Server-temp/" "SERVER.jar"
+                    cd D:/HRMS/Server-temp
+                    jar -xf SERVER.jar BOOT-INF/classes
+                    echo "Server moved successfully"
+                    """,
+                    returnStatus: true
+                )
+
+                if (result != 0 && result != 1 && result != 3) {
+                    error "Robocopy failed with exit code ${result}"
+                }
+            } else {
+                error "Unsupported Project parameter value: ${params.Platform_Type}"
+            }
+        }
+    }
+}
+
+
+            stage('Stop_start') {
+                steps {
+                    script {
+                        bat """
+                            @echo off
+                            setlocal
+
+                            REM Set BUILD_ID environment variable to avoid Jenkins killing the process
+                            set BUILD_ID=dontKillMe
+
+                            REM Trigger the scheduled task for Node.js
+                            schtasks /run /tn "Client_Server-STOP"
+
+                            echo "HRMS Application Stoped successfully."
+
+                            REM End local environment block
+                            endlocal
+
+                            REM Exit script, Jenkins should now complete
+                            exit /b 0
+                        """
+                    }
+                }
+            }
+
+
+            stage('Renaming destination folder') {
+                steps {
+                    script {
+                        bat """
+                        @echo off
+                            setlocal
+                            
+                            REM Wait for 60 seconds before executing this stage using ping command
+                            echo Waiting for 60 seconds...
+                            ping -n 16 127.0.0.1 > nulk
+
+                            REM Rename destination folder
+                            echo Renaming destination folder...
+
+                            REM Change to the D: drive and navigate to the HRMS directory
+                            cd /d D:/HRMS
+
+                            REM Remove the existing backup directory if it exists
+                            if exist "${params.Platform_Type}-backup" (
+                                echo Removing backup directory...
+                                rd /s /q "${params.Platform_Type}-backup"
+                                echo Backup removed.
+                            ) else (
+                                echo No backup directory found.
+                            )
+
+                            REM Rename the current folder to -backup
+                            if exist "${params.Platform_Type}" (
+                                echo Renaming ${params.Platform_Type} to ${params.Platform_Type}-backup...
+                                rename "${params.Platform_Type}" "${params.Platform_Type}-backup"
+                                echo Renamed ${params.Platform_Type} to ${params.Platform_Type}-backup.
+                            ) else (
+                                echo ${params.Platform_Type} folder not found.
+                            )
+
+                            REM Rename the temp folder to the original name
+                            if exist "${params.Platform_Type}-temp" (
+                                echo Renaming ${params.Platform_Type}-temp to ${params.Platform_Type}...
+                                rename "${params.Platform_Type}-temp" "${params.Platform_Type}"
+                                echo Renamed ${params.Platform_Type}-temp to ${params.Platform_Type}.
+                            ) else (
+                                echo ${params.Platform_Type}-temp folder not found.
+                            )
+
+                            endlocal
+                        """
+                    }
+                }
+            }
+
+
+            stage('Service_start') {
+                steps {
+                    script {
+                        bat """
+                            @echo off
+                            setlocal
+
+                            REM Wait for 60 seconds before executing this stage using ping command
+                            echo Waiting for 60 seconds...
+                            ping -n 16 127.0.0.1 > nulk
+
+                            REM Set BUILD_ID environment variable to avoid Jenkins killing the process
+                            set BUILD_ID=dontKillMe
+
+                            REM Trigger the scheduled task for Node.js
+                            schtasks /run /tn "Client-START"
+
+                            REM Trigger the scheduled task for Java
+                            schtasks /run /tn "Server-START"
+
+                            echo "HRMS Application Started successfully."
+
+                            REM End local environment block
+                            endlocal
+
+                            REM Exit script, Jenkins should now complete
+                            exit /b 0
+                        """
+                    }
+                }
+            }
+
+   
+       stage('Upload_to_Nexus') {
+       steps {
+         script {
+            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                def robocopyCommand = """
+                    @echo off
+                    REM Main logic
+                    echo "${params.Platform_Type}"
+                    if /I "${params.Platform_Type}"=="Server" (
+                        echo uploading the dependency into Nexus
+                        cd ${params.Platform_Type}\\platform\\SERVER\\target
+                        
+                        REM upload SERVER-jar-with-dependencies.jar exists
+                            curl -v -u %USERNAME%:%PASSWORD% ^
+                            --upload-file SERVER-jar-with-dependencies.jar ^
+                            https://rndnexus.progrec.com/repository/external-jars/com/progrecapps/SERVER-jar-with-dependencies/1.0/SERVER-jar-with-dependencies-1.0.jar
+
+
+                        REM upload SERVER.jar exists before uploading
+                            curl -v -u %USERNAME%:%PASSWORD% ^
+                            --upload-file SERVER.jar ^
+                            https://rndnexus.progrec.com/repository/Module-ProGReC-APPS/${params.Platform_Type}/SERVER.jar
+
+                         echo "Module ${params.Platform_Type} & dependency uploaded to Nexus repository.
+                        rename the dependency jar and move to .m2 folder
+                        echo "rename the dependency jar and move to .m2 folder"
+                        rename SERVER-jar-with-dependencies.jar SERVER-jar-with-dependencies-1.0.jar
+                        robocopy D:\\HRMS\\workspace\\Platform-Build-Deploy\\Server\\platform\\SERVER\\target\\ C:\\Users\\pbuddy\\.m2\\repository\\com\\progrecapps\\SERVER-jar-with-dependencies\\1.0\\ SERVER-jar-with-dependencies-1.0.jar /IS /R:1000000 /W:30
+                        if %ERRORLEVEL% NEQ 0 (
+                            echo "robocopy encountered an issue with exit code %ERRORLEVEL%."
+                            exit /b %ERRORLEVEL%
+                        )
+                    ) else (
+                        echo "No Dependencies to Upload in platform-${params.Platform_Type}"
+                    )
+                """
+                
+                // Execute the batch script and capture the exit code
+                def exitCode = bat(script: robocopyCommand, returnStatus: true)
+                
+                // Handle the exit code
+                if (exitCode != 0) {
+                    echo "robocopy completed with exit code ${exitCode}. This is expected and the pipeline will continue."
+                } else {
+                    echo "File copy completed successfully."
+                }
+            }
+        }
+    }
+}
+
+stage('Download and Copy File on Agent 241') {
+     agent { label 'Agent-241' } // Specify the label of agent 241
+    steps {
+        script {
+            dir("${params.Platform_Type}") {
+                        cleanWs()
+                    
+            if (params.Platform_Type == "Server") { // Groovy if condition
+
+                def nexusUrl = "https://rndnexus.progrec.com/repository/external-jars/com/progrecapps/SERVER-jar-with-dependencies/1.0"
+                def module = "SERVER-jar-with-dependencies" // Adjusted module name
+                def version = "1.0" // Version number
+
+                def fileUrl = "${nexusUrl}/${module}-${version}.jar"
+                def destinationPath = "${env.WORKSPACE}\\${params.Platform_Type}\\${module}-${version}.jar"
+                def destinationDir = "C:/Users/Admin/.m2/repository/com/progrecapps/SERVER-jar-with-dependencies/1.0"
+                def jarFile = "${destinationDir}\\${module}-${version}.jar"
+
+                // Batch script to download the file, check for existing .jar, and copy the new file
+                bat """
+                    @echo off
+                    setlocal enabledelayedexpansion
+
+                    REM Define the Nexus repository URL and structure
+                    set "nexusUrl=${nexusUrl}"
+                    set "fileUrl=${fileUrl}"
+
+                    REM Define the destination path for the downloaded file
+                    set "destinationPath=${destinationPath}"
+
+                    REM Download the file using PowerShell
+                    echo Downloading %fileUrl%...
+                    bitsadmin /transfer myDownloadJob /download /priority foreground "%fileUrl%" "%destinationPath%"
+                    REM powershell -Command "Invoke-WebRequest -Uri '%fileUrl%' -OutFile '%destinationPath%'"
+
+                    REM Check if the download was successful
+                    if exist "%destinationPath%" (
+                        echo File downloaded successfully to %destinationPath%
+
+                        REM Check if the .jar file exists and delete it if it does
+                        if exist "${jarFile}" (
+                            echo .jar file found at ${jarFile}. Deleting it...
+                            del "${jarFile}"
+                        ) else (
+                            echo No .jar file found at ${jarFile}.
+                        )
+
+                        REM Copy the downloaded file to the destination directory
+                        echo Copying %destinationPath% to ${destinationDir}...
+                        copy "%destinationPath%" "${destinationDir}"
+
+                        echo File copied successfully.
+                    ) else (
+                        echo Failed to download the file. Please check the module name and version.
+                    )
+
+                    endlocal
+                """
+            } else {
+                echo "No Dependencies to download in platform-${params.Platform_Type}"
+            }
+        }
+    }
+}
+}
+ }
+}

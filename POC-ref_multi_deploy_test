@@ -1,0 +1,42 @@
+@Library("jenkins-shared-library") _
+
+pipeline {
+    agent {
+        label 'Agent-249'
+    }
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
+
+stages {
+        stage('Check Parameters') {
+            steps {
+                script {
+                    // Safe check for MODULES parameter
+                    if (params.MODULES) {
+                        def selectedModules = params.MODULES.split(',')
+                        def versionsMap = [:]
+                        
+                        selectedModules.each { module ->
+                            def version = params["${module}_version"]
+                            if (version) {
+                                versionsMap[module] = version
+                            } else {
+                                echo "Warning: Version for module '${module}' is missing."
+                            }
+                        }
+
+                        // Print the versions
+                        versionsMap.each { module, version ->
+                            echo "Module: ${module}, Version: ${version}"
+                        }
+                    } else {
+                        echo "No modules selected."
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,742 @@
+//  The objective of this pipeline is to build the module package for the deployment based on the inputs like Customer,Build_Version, Start_Revision, End Revision, Branch and  Module
+// Created on:15-01-2025
+// Updated on:23-01-2025
+// Created By: Dhananjaya K L (Junior_DevOps_Engineer)
+// Extended details about the pipeline is provided in the end of this file
+
+@Library("jenkins-shared-library") _ // IF this pipeline script is using the shared library concept then this command is must, 
+
+pipeline {
+    agent {
+        // Mention the the Jenkins agent label which is configuredi nthe Jenkins console under nodes to execute this pipeline
+        // Plugin to be installed: SSH Agent Plugin
+        label 'JENKINS-AGENT'
+    }
+
+    options {
+        // This section will avoid cloning shared library repository to the target instance since the source files is being maintained in the other repository hence skipping the default checkout
+        skipDefaultCheckout(true)
+    }
+
+    environment {
+        // This section to define the environment to use that further in the repository
+        //common timestamp ref used across the stages to avoid time differences in each stage
+        timestamp = new Date().format("dd-MM-yyyy_HH:mm", TimeZone.getTimeZone('Asia/Kolkata'))
+    }
+
+    parameters {
+        // This section used to configure the input to the pipeline
+        //note: the script for reactive input is provided in the Jenkins Console,  Ref link: https://github.com/ProGReC-APPS/jenkins-shared-library/tree/main/References
+        // Plugin to be installed: Active Choice Plug-in
+        choice(name: 'Customer', choices: ['Progrec-APPS', 'AEON-Credit'], description: 'Select the target customer')
+        string(name: 'Build_Version', defaultValue: '1.0', description: 'Specify the version to build')
+        string(name: 'Start_Revision', defaultValue: 'TAIL', description: 'Specify the start revision for build')
+        string(name: 'End_Revision', defaultValue: 'HEAD', description: 'Specify the end revision for build')
+        choice(name: 'Branch', choices: ['main', 'development'], description: 'Branch to build')
+    }
+
+    stages {  
+stage('Nexus_Scan') { 
+    //    In this step groovy script is used to assign the values for Module_Name & Sonar_project based on the input provided in in the parammeter input section, 
+    //    module input script is not written in this pipeline script its configured in the jenkins console configure section.
+    
+        steps {
+            dir("${params.Customer}/${params.Module}") {
+                script {
+                    switch (params.Customer) {
+                        case 'Progrec-APPS':
+                            switch (params.Module) {
+                                case 'grc':
+                                    Module_Name = "grc"
+                                    Sonar_Project = "grc"
+                                    break
+                                case 'issue':
+                                    Module_Name = "issue"
+                                    Sonar_Project = "issue"
+                                    break
+                                case 'risk':
+                                    Module_Name = "risk"
+                                    Sonar_Project = "risk"
+                                    break
+                                case 'controltesting':
+                                    Module_Name = "controltesting"
+                                    Sonar_Project = "controltesting"
+                                    break
+                                case 'businessresilience':
+                                    Module_Name = "businessresilience"
+                                    Sonar_Project = "businessresilience"
+                                    break
+                                case 'survey':
+                                    Module_Name = "survey"
+                                    Sonar_Project = "survey"
+                                    break
+                                case 'engine':
+                                    Module_Name = "engine"
+                                    Sonar_Project = "engine"
+                                    break
+                                case 'admin':
+                                    Module_Name = "admin"
+                                    Sonar_Project = "admin"
+                                    break
+                                case 'attendance':
+                                    Module_Name = "attendance"
+                                    Sonar_Project = "attendance"
+                                    break
+                                case 'incident':
+                                    Module_Name = "incident"
+                                    Sonar_Project = "incident"
+                                    break
+                                case 'monitor':
+                                    Module_Name = "monitor"
+                                    Sonar_Project = "monitor"
+                                    break
+                                case 'project':
+                                    Module_Name = "project"
+                                    Sonar_Project = "project"
+                                    break
+                                case 'document':
+                                    Module_Name = "document"
+                                    Sonar_Project = "document"
+                                    break
+                                case 'employee':
+                                    Module_Name = "employee"
+                                    Sonar_Project = "employee"
+                                    break
+                                case 'keyshield':
+                                    Module_Name = "keyshield"
+                                    Sonar_Project = "keyshield"
+                                    break
+                                case 'leave':
+                                    Module_Name = "leave"
+                                    Sonar_Project = "leave"
+                                    break
+                                case 'resolve':
+                                    Module_Name = "resolve"
+                                    Sonar_Project = "resolve"
+                                    break
+                                case 'syscare':
+                                    Module_Name = "syscare"
+                                    Sonar_Project = "syscare"
+                                    break
+                                case 'vendor':
+                                    Module_Name = "vendor"
+                                    Sonar_Project = "vendor"
+                                    break
+                                case 'internalaudit':
+                                    Module_Name = "internalaudit"
+                                    Sonar_Project = "internalaudit"
+                                    break
+                                case 'loss':
+                                    Module_Name = "loss"
+                                    Sonar_Project = "loss"
+                                    break
+                                case 'crm':
+                                    Module_Name = "crm"
+                                    Sonar_Project = "crm"
+                                    break
+                                case 'za':
+                                    Module_Name = "za"
+                                    Sonar_Project = "za"
+                                    break              
+                                default:
+                                    error "Unsupported Module for Progrec-APPS: ${params.Module}"
+                            }
+                            break
+                        case 'AEON-Credit':
+                            switch (params.Module) {
+                                case 'admin':
+                                    Module_Name = "admin-AEON-Credit"
+                                    Sonar_Project = "admin"
+                                    break
+                                case 'engine':
+                                    Module_Name = "engine-AEON-Credit"
+                                    Sonar_Project = "engine"
+                                    break
+                                case 'vendor':
+                                    Module_Name = "vendor-AEON-Credit"
+                                    Sonar_Project = "vendor"
+                                    break
+                                default:
+                                    error "Unsupported Module for AEON-Credit: ${params.Module}"
+                            }
+                            break
+                        default:
+                            error "Unsupported Customer: ${params.Customer}"
+                    }
+                    echo "Assigned Git Module: ${Module_Name}"
+                }
+
+                //  In this step shell script is used to check the if the package which is going to be build already exists in the Nexus repository
+               //   if exists the pipeline will fail with the appropriate message if doesnt exist the pipeline will proceed to he subsequent step
+
+                withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                    sh """
+                        #!/bin/bash
+                        
+                        # To hide the execution logs
+                        set +x 
+
+                        NEXUS_URL="https://rndnexus.progrec.com"
+                        REPO="Module-Objects"
+                        PACKAGE_NAME="${params.Customer}/${params.Module}/${params.Build_Version}/${params.Module}-${params.Build_Version}.zip"
+                        echo "\$PACKAGE_NAME"
+                        
+                        EXISTING_PACKAGE=\$(curl -s -u \$USERNAME:\$PASSWORD \\
+                            "\$NEXUS_URL/service/rest/v1/search/assets?repository=\$REPO&q=\$PACKAGE_NAME" | \\
+                            jq '.items[] | select(.path | contains("'"\$PACKAGE_NAME"'"))')
+                        
+                        if [ -n "\$EXISTING_PACKAGE" ]; then
+                            echo "Recheck the version input or delete the module package from nexus to proceed"
+                            echo "Package \$PACKAGE_NAME already exists in Nexus. Terminating the pipeline."
+                            
+                            exit 1
+                        else
+                            echo "Package \$PACKAGE_NAME does not exist."
+                            echo "Proceed with next stage to build package."
+                        fi
+                    """
+                }
+                
+                cleanWs() // In this step the workspace will get cleaned before checking out the github repository
+            }
+        }
+    }  
+    
+    
+          stage('Git_Checkout') {  
+            steps {
+                script {
+                    dir("${params.Customer}/${Module_Name}") {  //Clones the respective git reposiotry based on the input module
+                        echo "Cloning repository for module: ${Module_Name}"
+                        git branch: "${params.Branch}",
+                            url: "https://github.com/ProGReC-APPS/${Module_Name}.git",
+                            credentialsId: 'Github-ProGReC-APPS' //configure the credentials in the Jenkiins console and pass that here.
+
+                    if (params.Start_Revision == 'TAIL') {  //Determinie the start revision if the input is kept as default "TAIL" 
+                        def Initial_commit = sh(script: 'git rev-list --max-parents=0 HEAD', returnStdout: true).trim()
+                        env.Start_Revision = Initial_commit
+                    } else {
+                        env.Start_Revision = params.Start_Revision
+                    }
+                    echo "Revision: ${env.Start_Revision}"
+                    
+                    //This script will determine the difference between the commidt IDs  and write those files to the diff_list.txt file
+                    sh """  
+                            # To hide the execution logs
+                            set +x 
+
+                            git checkout ${params.Branch}
+                            git checkout ${params.End_Revision}
+                            git diff --name-only ${env.Start_Revision} ${params.End_Revision} > diff_list.txt
+                            
+                            echo "Successfully Cloned Project: ${Module_Name}"
+                            echo "Checkout out branch : ${params.Branch_Name}"
+                            echo "Checkout out Revision : ${params.End_Revision}"
+                            echo "files Changed between the commit Id's is wrttien to diff_list.txt"
+                        """    
+                    }
+                }
+            }
+        }
+
+        stage('Build_Project') { // This stage will build platform jar if server is selected in the input , 
+        // if the module is selected, script will look for the presence of pom.xml file in the server folder, if pom exists it builds jar if not proceed with the next stage.
+            steps {
+                script {
+                    dir("${params.Customer}/${Module_Name}") {
+                        sh """
+                            
+                            # To hide the execution logs
+                            set +x
+
+                            mkdir -p ${params.Module}/client ${params.Module}/objects ${params.Module}/scripts/pre ${params.Module}/scripts/post ${params.Module}/server
+
+                            echo "Module folders created"
+
+                            # Initialize the ignored files log
+                            > not_existing_files.txt
+
+                            # Iterate over each file in diff_list.txt
+                            while IFS= read -r file; do
+                                # Skip unwanted files
+                                case "\$file" in
+                                    '.gitignore'|*sonar-project.properties|server/*)
+                                        continue
+                                        ;;
+                                esac
+
+                                # Check if the file exists
+                                if [ -f "\$file" ]; then
+                                    # Copy the file with its parent directory structure
+                                    cp --parents "\$file" ${params.Module}
+                                else
+                                    # Log the missing file
+                                    echo "\$file" >> not_existing_files.txt
+                                fi
+                            done < diff_list.txt
+
+                            echo "Copy completed. Ignored files are listed in not_existing_files.txt."
+
+                            #copy sonar-project.properties file to module folder
+                            cp sonar-project.properties ${params.Module}/
+                        """
+
+                        // Check for server files in diff_list.txt
+                        def serverFilesFound = sh(script: "grep -q '^server/' diff_list.txt", returnStatus: true)
+
+                        if (serverFilesFound == 0) {
+                            // If grep found server files (exit code 0), execute the build commands
+                            sh """  
+                                set =x
+
+                                if [ -f server/pom.xml ]; then
+                                    cd server && mvn package && cd ..
+                                    # cp server/target/*.jar ${params.Module}/server/${params.Module}.jar
+                                    cp -r server/ ${params.Module}/
+                                else
+                                    echo "No POM file exists in server"
+                                fi
+                            """
+                        } else {
+                            // If no server files are found, log the message
+                            echo "No changes in server code "
+                    }
+                    }
+                }
+            }
+        }
+
+        stage('SonarQube_Analysis') { 
+            // This stage will Scans the code, fetch the json report through API call from sonarQube server based on the created date, then generate the html report
+                    // Plugin to be installed in master Jenkins: SonarQube Scanner for Jenkins 
+                    steps {
+                        script {
+                            dir("${params.Customer}/${Module_Name}") {
+                            def currentDate = new Date().format("yyyy-MM-dd")
+                            def date = new Date().format("yyyy-MM-dd_HH-mm")
+                            def outputHtmlPath = "${params.Module}-Sonar-${env.timestamp}.html"
+                            def scanReportDir = "Scan_Report" 
+                            def jsonFilePath = "API.json" // Ensure jsonFilePath is defined in Groovy
+                            def sonarHtmlReport = "${params.Module}-Sonar-${env.timestamp}.html"
+
+                            echo "Current_Date: ${currentDate}"
+                            echo "Sonar_Project: ${Sonar_Project}"
+                            echo "Time_stamp: ${env.timestamp}"
+
+                            dir("${params.Module }") {
+                            // Use the SonarQube scanner
+                            def scannerHome = tool 'SonarQube-Scanner' // Ensure this matches your installation
+                            withSonarQubeEnv('SonarQube_Server') { // The name you gave in Step 2
+                                // Run the SonarQube analysis
+                                // sh "${scannerHome}/bin/sonar-scanner -Dproject.settings=sonar-project.properties"
+                                sh "${scannerHome}/bin/sonar-scanner -Dproject.settings=sonar-project.properties"
+                            }
+                            }
+                            
+
+                            // Use withEnv to set environment variable for shell script
+                            withEnv(["Sonar_Project=${Sonar_Project}"]) {
+                                sh """
+                                    #!/bin/bash
+                                    
+                                    # To hide the execution logs
+                                    set +x 
+
+                                    echo "Waiting for 2 seconds..."
+                                    sleep 2
+
+                                    # Define the SonarQube URL and token
+                                    sonaruri="http://192.168.1.229:9011"
+                                    token="sqa_79baf4356b44635732ba0bcea01487cfb9bda66e"
+
+                                    # Define the current date and format it for URL
+                                    currentDate=\$(date +'%Y-%m-%d')
+
+                                    # Fetch the SonarQube project from environment variable
+                                    sonarProject="\${Sonar_Project}"
+
+                                    # Check and output the project
+                                    if [ -z "\$sonarProject" ]; then
+                                        echo "Sonar_Project environment variable is not set."
+                                    else
+                                        echo "Fetching data for project: \$sonarProject"
+                                    fi
+
+                                    # Curl command body without date filter
+                                    body="components=\$sonarProject&s=FILE_LINE&createdAfter=\$currentDate&issueStatuses=CONFIRMED,OPEN&ps=500&facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&additionalFields=_all&timeZone=Asia/Calcutta"
+                                    uri="\$sonaruri/api/issues/search?\$body"
+
+                                    # Make the API call using curl
+                                    response=\$(curl -s -H "Content-Type: application/json" -H "Authorization: Bearer \$token" "\$uri")
+                                    
+                                    # Define the path to the JSON file
+                                    # jsonFilePath="API.json"
+                                    
+                                    # Save the response to the JSON file
+                                    echo "\$response" > API.json
+
+                                    # Output the file path for verification
+                                    echo "API response saved to: \${jsonFilePath}"
+
+                                    # Export variables for Node.js
+                                        export currentDate="${currentDate}"
+                                        export outputHtmlPath="${outputHtmlPath}"
+                                        export jsonFilePath="${jsonFilePath}"
+
+                                        # Check if JSON file exists
+                                        if [ ! -f "\$jsonFilePath" ]; then
+                                            echo "JSON file not found: \$jsonFilePath"
+                                            exit 1
+                                        fi
+
+                                        # Run Node.js code to generate the report
+                                        node -e '
+                                        const fs = require("fs");
+
+                                        // Load JSON file
+                                        const jsonFilePath = process.env.jsonFilePath || "API.json";
+                                        const currentDate = process.env.currentDate || new Date().toISOString().split("T")[0];
+                                        let outputHtmlPath = process.env.outputHtmlPath || "123.html";
+
+                                        // Function to generate HTML content
+                                        function generateHtmlReport(issues) {
+                                            const sonarQubeUrl = "http://192.168.1.229:9011";
+                                            let htmlContent = "<html>" +
+                                                "<head>" +
+                                                "<title>Scan Report - " + currentDate + "</title>" +
+                                                "<style>" +
+                                                "body { font-family: Arial, sans-serif; color: #333; background-color: #f4f4f9; }" +
+                                                "h1 { color: #333; text-align: center; margin-bottom: 20px; font-size: 24px; }" +
+                                                "h2 { color: #333; margin-bottom: 20px; font-size: 24px; }" +
+                                                "table { width: 100%; border-collapse: collapse; border: 1px solid #000000; margin-bottom: 20px; }" +
+                                                "th, td { border: 1px solid #ddd; padding: 10px; text-align: left; max-width: 150px; word-wrap: break-word; }" +  // Add max-width and word-wrap to limit and wrap text
+                                                "th { background-color: #5D5CDA; color: white; font-size: 20px; }" +
+                                                "tr:nth-child(even) { background-color: #f9f9f9; }" +
+                                                "tr:hover { background-color: #f1f1f1; }" +
+                                                "a { color: #000000; text-decoration: underline; cursor: pointer; font-weight: bold; }" +
+                                                "a:hover { color: #333; text-decoration: underline; }" +
+                                                ".no-issues { text-align: center; font-size: 18px; color: #555; margin-top: 20px; }" +
+                                                "</style>"
+                                                +
+                                                "</head>" +
+                                                "<body>" +
+                                                "<h1>Scan Report </h1>" +
+                                                "<h2>Project Name - " + issues[0].project + "</h2>" +
+                                                "<h2>Created Date - " + issues[0].creationDate + "</h2>" +
+                                                "<table>" +
+                                                "<tr>" +
+                                                "<th>Key</th><th>Severity</th><th>Component</th>" +
+                                                "<th>Line</th><th>Message</th><th>Author</th><th>Update Date</th>" +
+                                                "<th>Status</th><th>Type</th>" +
+                                                "</tr>";
+
+                                            for (let issue of issues) {
+                                                const issueUrl = sonarQubeUrl + "/project/issues?id=" + encodeURIComponent(issue.project) + "&issues=" + encodeURIComponent(issue.key);
+                                                htmlContent += "<tr>" +
+                                                    "<td><a href=" + issueUrl + " target=_blank>" + issue.key + "</a></td>" +
+                                                    "<td>" + issue.severity + "</td><td>" + issue.component + "</td>" +
+                                                    "<td>" + (issue.line || "") + "</td><td>" + issue.message + "</td><td>" + (issue.author || "") + "</td>"+
+                                                    "<td>" + (issue.updateDate || "") + "</td><td>" + issue.status + "</td><td>" + issue.type + "</td>" +
+                                                    "</tr>";
+                                            }
+
+                                            htmlContent += "</table></body></html>";
+                                            return htmlContent;
+                                        }
+
+                                        // Parse JSON data and filter issues
+                                        try {
+                                            const jsonData = JSON.parse(fs.readFileSync(jsonFilePath, "utf-8"));
+                                            const issues = jsonData.issues.filter(issue => issue.creationDate && issue.creationDate.includes(currentDate));
+
+                                            // Generate and write HTML report
+                                            let htmlContent;
+                                            if (issues.length > 0) {
+                                                htmlContent = generateHtmlReport(issues);
+                                            } else {
+                                                htmlContent = "<html>" +
+                                                    "<head><title>Scan Report - " + currentDate + "</title></head>" +
+                                                    "<body><h1>Scan Report - " + currentDate + "</h1>" +
+                                                    "<p class='no-issues'>SonarQube found no new issues with this package</p>" +
+                                                    "</body></html>";
+                                            }
+                                            fs.writeFileSync(outputHtmlPath, htmlContent);
+                                            console.log("HTML report written to " + outputHtmlPath);
+                                        } catch (error) {
+                                            console.error("Error processing JSON data:", error);
+                                            process.exit(1);
+                                        }
+                                        '
+
+                                """
+                            }
+
+                            def report = "${params.Module}-Sonar-${env.timestamp}.html"                
+                            emailext(
+                                subject: "HTML Report from Jenkins Job: pipeline",
+                                body: """<p>Hi,</p>
+                                        <p>The HTML report for the job <b>${params.Module}</b> is attached.</p>
+                                        <p>Regards,<br>Jenkins</p>""",
+                                to: 'dhananjaya.k@probuddysoftware.com', // Email ID to whihc mail has to be sent
+                                attachmentsPattern: "${report}",
+                                mimeType: 'text/html',
+                                
+                            )
+                            
+                            //Thsi stage will upload the scan report to the nexus & publsih the report in th e Jenkins console
+                            // Plugin to be installed: HTML publisher plugin
+                            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                            // Use environment variables instead of direct interpolation
+                            sh """
+                                set +x
+
+                                echo "${env.timestamp}"
+                                curl -u "\$USERNAME:\$PASSWORD" --upload-file "${params.Module}-Sonar-${env.timestamp}.html" "https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}/${params.Module}/${params.Build_Version}/${params.Module}-Sonar-${env.timestamp}.html"
+                                echo "Sonar scan report: https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}/${params.Module}/${params.Build_Version}/${params.Module}-Sonar-${env.timestamp}.html"
+                            """
+                                }
+
+
+                            // Create the Scan_Report directory 
+                            sh """
+
+                            # To hide the execution logs
+                            set +x 
+
+                            mkdir -p ${scanReportDir}
+                            cp API.json ${scanReportDir}/
+                            # cp htmlpublisher-wrapper.html ${scanReportDir}/
+                            cp ${outputHtmlPath} ${scanReportDir}/
+                            """
+
+                            // Publish the HTML report
+                            publishHTML([
+                                allowMissing: false,
+                                alwaysLinkToLastBuild: false,
+                                keepAll: true,
+                                reportDir: scanReportDir,
+                                reportFiles: "${params.Module}-Sonar-${env.timestamp}.html",
+                                reportName: 'Scan Report',
+                                reportTitles: '',
+                                useWrapperFileDirectly: true
+                            ])    
+
+                            }
+                        }
+                    }
+                }
+
+        stage('Upload_to_Nexus') { //This atage will zip & uplaod the module.zip output file to the Nexus
+            steps {
+                script {
+                    dir("${params.Customer}/${Module_Name}") {
+                            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                                // Use environment variables instead of direct interpolation
+                                sh """
+                                # To hide the execution logs
+                                set +x 
+
+                                # copy module.jar & delete the server src & class files
+
+                                if [ -f server/pom.xml ]; then
+                                # search for pom file in server folder
+                                    
+                                cp ${params.Module}/server/target/*.jar ${params.Module}/server/${params.Module}.jar 
+                                else
+                                    echo "No POM file exists in server/No module jar for ${params.Module} "
+                                fi
+                            
+                                # delete the src ,cass files
+                                find ${params.Module}/server -mindepth 1 ! -name '${params.Module}.jar' -exec rm -rf {} +
+
+                                # delete the sonar-property file
+                                rm ${params.Module}/sonar-project.properties
+                                rm -rf "${params.Module}/.scannerwork"
+
+                                # Zip the folder
+                                zip -r ${params.Module}-${params.Build_Version}.zip ${params.Module}
+                                echo "Zipped the module package"
+                                
+                                # Upload the package
+                                curl -u "\$USERNAME:\$PASSWORD" --upload-file "${params.Module}-${params.Build_Version}.zip" "https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}/${params.Module}/${params.Build_Version}/${params.Module}-${params.Build_Version}.zip"
+                                """
+                        }
+                    }
+                }
+            }        
+        }
+
+                    stage('Project_update') { //This stage will parse the project data and generate the HTML report & uploads to the NExus repository
+                steps {
+                    script {
+                        dir("${params.Customer}/${Module_Name}") {
+                        def jsonFilePath = "${pwd()}/report.json"
+                        def module = params.Module
+                        def version = params.Build_Version
+                        def currentTime = new Date().format("yyyy-MM-dd'T'HH:mm:ss.SSSZ", TimeZone.getTimeZone('Asia/Kolkata'))
+                        def Start_Commit_ID = env.Start_Revision
+                        def End_Commit_ID = params.End_Revision
+                        def Customer = params.Customer
+                        def Branch = params.Branch
+                        def htmlFilePath = "report.html" // Path for the generated HTML file
+                        
+
+                        // Inline logic to fetch commit details
+                        def fetchCommitDetails = { commitId ->
+                            sh(
+                                script: "git show ${commitId} --pretty=format:'{\"Commit_ID\": \"%H\", \"Commit_Message\": \"%s\", \"Commit_Date\": \"%ci\"}' --no-patch",
+                                returnStdout: true
+                            ).trim()
+                        }
+
+                        // Fetch commit details for Start and End Commit IDs
+                        def startCommitDetails = fetchCommitDetails(Start_Commit_ID)
+                        def endCommitDetails = fetchCommitDetails(End_Commit_ID)
+
+                        // Prepare JSON content
+                        def jsonContent = """
+                        {
+                            "Module_Name": "${module}",
+                            "Build_Version": "${version}",
+                            "Time": "${currentTime}",
+                            "Start_Commit_ID": "${Start_Commit_ID}",
+                            "Start_Commit_Details": ${startCommitDetails},
+                            "End_Commit_ID": "${End_Commit_ID}",
+                            "End_Commit_Details": ${endCommitDetails},
+                            "Customer": "${Customer}",
+                            "Branch": "${Branch}",
+                        }
+                        """
+
+                        // Write JSON content to the file
+                        writeFile file: jsonFilePath, text: jsonContent
+
+                            // Read the generated JSON content from the file
+                            def json_Content = readFile("report.json")
+                            
+                            // Parse the JSON content
+                            def jsonData = readJSON text: json_Content
+
+                            // Generate the HTML content for the report
+                            def htmlContent = """
+                                <!DOCTYPE html>
+                                <html lang="en">
+                                <head>
+                                    <meta charset="UTF-8">
+                                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                    <title>Module Build Report</title>
+                                    <style>
+                                        table {
+                                            width: 100%;
+                                            border-collapse: collapse;
+                                            margin-top: 20px;
+                                        }
+                                        table, th, td {
+                                            border: 1px solid black;
+                                        }
+                                        th, td {
+                                            padding: 8px;
+                                            text-align: left;
+                                        }
+                                    </style>
+                                </head>
+                                <body>
+                                    <h1>Module Package Build Report</h1>
+                                    <h2>Pipeline Name: Module Package</h2>
+                                    
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Attribute</th>
+                                                <th>Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td>Module Name</td>
+                                                <td>${jsonData.Module_Name}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Build Version</td>
+                                                <td>${jsonData.Build_Version}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Time</td>
+                                                <td>${jsonData.Time}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Start Commit ID</td>
+                                                <td>${jsonData.Start_Commit_ID}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Start Commit Message</td>
+                                                <td>${jsonData.Start_Commit_Details.Commit_Message}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Start Commit Date</td>
+                                                <td>${jsonData.Start_Commit_Details.Commit_Date}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>End Commit ID</td>
+                                                <td>${jsonData.End_Commit_ID}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>End Commit Message</td>
+                                                <td>${jsonData.End_Commit_Details.Commit_Message}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>End Commit Date</td>
+                                                <td>${jsonData.End_Commit_Details.Commit_Date}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Customer</td>
+                                                <td>${jsonData.Customer}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Branch</td>
+                                                <td>${jsonData.Branch}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </body>
+                                </html>
+                            """
+
+                            // Write the HTML content to the file
+                            writeFile(file: htmlFilePath, text: htmlContent)
+
+                            echo "HTML report generated at: ${htmlFilePath}"
+
+                            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                                // Use environment variables instead of direct interpolation
+                                sh """
+                                # To hide the execution logs
+                                set +x 
+
+                                echo "Timestmp: ${env.timestamp}"
+                                curl -s -u "\$USERNAME:\$PASSWORD" --upload-file "report.html" "https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}/${params.Module}/${params.Build_Version}/${params.Module}-Build_report-${env.timestamp}.html"
+                                echo "Scan report link: https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}/${params.Module}/${params.Build_Version}/${params.Module}-Build_report-${env.timestamp}.html"
+                                """
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+// Note: There is few configuration need to be done in the Jenkins Console so that this pipeline will run as expected.
+// 1) Plugins to be download in Jenkins 
+    // a) Active choice Plugin-in
+    // b) Multiselect parmeter
+    // c) Matrix Authorization Strategy Plugin
+    // d) Credentails Plugin
+
+// 2) Jenkins Console configuation Reference link: https://github.com/ProGReC-APPS/jenkins-shared-library/tree/main/References
+
+// 3) Set the appropriate credentias in the crednetials section.
+// 4) Set the proper label the setup the Jenkins agent
+// 5) Set the node configurations inthe JEnkins console
+// 6) Set the tools configuration in the Jenkins conole
+// 7) Set the Jenkins user configuration in the Jenkins console
+// 8) Set the Jenkins global configuration in the Jenkins console

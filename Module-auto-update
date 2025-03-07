@@ -1,0 +1,228 @@
+//  The objective of this pipeline is to start the node & the java services based on type of instance.
+// Created on:27-01-2025
+// Updated on:27-01-2025
+// Created By: Dhananjaya K L (Junior_DevOps_Engineer)
+// The sshpass tool in the target instance should be pre installed
+@Library("jenkins-shared-library") _ // If this pipeline script is using the shared library concept then this command is must,
+
+pipeline { 
+    agent { // Mention the label of the instance to execute the script
+        label 'JENKINS-AGENT'
+    }
+    
+    parameters { // pipelin input configuration is done in parameter section
+        string(name: 'REPO_BRANCH_NAME', defaultValue: '', description: 'Repository URL triggering this pipeline')
+        
+    }
+    options { // This block stops the cloning of the shared library repository 
+        skipDefaultCheckout(true)
+    }
+
+    stages {
+        
+stage('Identify_Repository') { // This stage will split the Repo_BRANCH_NAME  to extrac the branch & the repository name
+            steps {
+                script {
+                    // Ensure REPO_BRANCH_NAME is set
+                    if (!params.REPO_BRANCH_NAME) {
+                        error "Parameter REPO_BRANCH_NAME is required but not set."
+                    }
+
+                    // Split the branch name into repo and branch parts
+                    def branchParts = params.REPO_BRANCH_NAME.split('/')
+                    if (branchParts.length < 2) {
+                        error "Invalid REPO_BRANCH_NAME format. Expected format: 'repo-name/branch-name'. Got: ${params.REPO_BRANCH_NAME}"
+                    }
+
+                    def repoName = branchParts[0]  // Extracting 'grc-old'
+                    def branch = branchParts[1]   // Extracting 'development'
+
+                    echo "Repository name: ${repoName}"
+                    echo "Branch name: ${branch}"
+
+                    // Construct the repository URL
+                    def repoURL = "https://github.com/ProGReC-APPS/${repoName}.git"
+                    echo "Repository URL: ${repoURL}"
+
+                    // Set the target folder for the repository
+                    env.TARGET_FOLDER = "${repoName}/server"
+                    echo "Target folder: ${env.TARGET_FOLDER}"
+
+                    // Clone the repository
+                    dir(repoName) {
+                        echo "Cloning repository ${repoURL} with branch ${branch}"
+                        git branch: branch, url: repoURL, credentialsId: 'Github-ProGReC-APPS'
+                    }
+                }
+            }
+        }
+
+        stage('Build .jar') { //  This stage will navigate to the project location & build the jar
+            steps {
+                script {
+                    echo "Building .jar for ${env.TARGET_FOLDER}..."
+                    sh """
+                        set +x 
+
+                        cd ${env.TARGET_FOLDER}
+                        mvn clean package
+                    """
+                    echo "Build successful for ${env.TARGET_FOLDER}."
+                }
+            }
+        }
+
+       stage('Get-module name') { //This branch will extract the module name & the verison ofthe module buildt from thetarget fodler after the jar got built
+    steps {
+        script {
+            def SOURCE_FILE = "${WORKSPACE}/${env.TARGET_FOLDER}/target/*.jar"
+            sh """
+                #!/bin/bash
+
+                set +x
+
+                # Check if the target file exists
+                if ls ${SOURCE_FILE} 1>/dev/null 2>&1; then
+                    FILE_NAME=\$(basename ${SOURCE_FILE})  # e.g., grc-2.0.jar
+                    REPO_NAME=\$(echo \${FILE_NAME} | cut -d '-' -f 1)  # e.g., grc
+                    VERSION=\$(echo \${FILE_NAME} | cut -d '-' -f 2 | cut -d '.' -f 1)  # e.g., 2
+
+                    echo "File Name: \${FILE_NAME}"
+                    echo "Repository Name: \${REPO_NAME}"
+                    echo "Version: \${VERSION}"
+
+                    # Export REPO_NAME as an environment variable
+                    echo "REPO_NAME=\${REPO_NAME}" > env.properties
+                else
+                    echo "No .jar file found in ${SOURCE_FILE}"
+                    exit 1
+                fi
+            """
+            // Load the exported REPO_NAME variable
+            def props = readProperties(file: 'env.properties')
+            env.REPO_NAME = props['REPO_NAME']
+        }
+    }
+}
+
+
+        stage('Update-jar-in-target-instance') { // This stage will connect to the target instance & take backup of the old jar & update with the new jar
+            agent { label 'JENKINS-AGENT-SSH' }
+            steps {
+                script {
+                    def server2_username = 'root'  // Replace with actual username
+                    def server2_password = 'root'  // Replace with actual password
+                    def server2_ip = '192.168.1.229'  // Replace with actual IP address of Server 2
+                    def port = '24'  // SSH port
+                    def DEST_DIR = "/HRMS/moduleJar"
+                    def BACKUP_DIR = "/HRMS/moduleJar/backup"
+                    def SOURCE_FILE = "/home/workspace/Module-auto-update-POC/${env.TARGET_FOLDER}/target/*.jar"
+                    
+                    sh """
+                        #!/bin/bash
+
+                        Set +x
+    
+                        # Ensure the backup folder exists
+                        mkdir -p "${BACKUP_DIR}"
+
+                        # Find existing files for the same repository
+                        echo "${env.REPO_NAME}"
+                        EXISTING_FILE=\$(ls ${DEST_DIR}/${env.REPO_NAME}-*.jar 2>/dev/null | head -n 1)
+                         echo "\${EXISTING_FILE}"
+
+                        # If a file exists, move it to the backup directory
+                        if [ -n "\${EXISTING_FILE}" ]; then
+                            mv "\${EXISTING_FILE}" "${BACKUP_DIR}/"
+                        fi
+
+                    # Copy the new file to the remote server
+                    sshpass -p '${server2_password}' scp -o StrictHostKeyChecking=no -P '${port}' "${server2_username}@${server2_ip}:${SOURCE_FILE}" "${DEST_DIR}/"
+               
+                """
+                }
+            }
+        }
+
+
+
+
+
+        stage('Stop-Service') {
+            agent { label 'JENKINS-AGENT-SSH' }
+            steps {
+                script {
+                    script {
+                    // Avoid failure by capturing the exit status of the shell script
+                    def stopNodeStatus = sh(
+                        script: """
+                            
+                            set +x 
+
+                            # Check for running node services
+                            echo "Checking for running node processes..."
+                            
+                            # Find and kill node processes if they are running
+                            NODE_PID=\$(pgrep -f node)
+                            if [ -n "\$NODE_PID" ]; then
+                                echo "Node process found with PID: \$NODE_PID, killing it."
+                                kill -9 \$NODE_PID || echo "Failed to kill Node process, it might have already been stopped."
+                                echo "Node service stopped successfully."
+                            else
+                                echo "No node service running."
+                            fi
+                        """,
+                        returnStatus: true // Capture exit status
+                    )
+
+                    def stopJavaStatus = sh(
+                        script: """
+
+                            Set +x
+
+                            # Check for Java process running on port 8080
+                            echo "Checking for Java process running on port 8080..."
+                            JAVA_PID=\$(lsof -t -i:8080)
+
+                            if [ -n "\$JAVA_PID" ]; then
+                                echo "Java process found with PID: \$JAVA_PID running on port 8080, killing it."
+                                kill -9 \$JAVA_PID || echo "Failed to kill Java process, it might have already been stopped."
+                                echo "Java service stopped successfully."
+                            else
+                                echo "No Java service running on port 8080."
+                            fi
+                        """,
+                        returnStatus: true // Capture exit status
+                    )
+
+                    // Ensure the stage passes regardless of whether processes are found or not
+                    echo "Node stop status: ${stopNodeStatus}, Java stop status: ${stopJavaStatus}"
+                    echo "ProGRec Application Stopped successfully."
+                }
+            }
+        }             
+    }
+
+        stage('Start-Service') { //Working script, both server and client serivice starting & pipeline stopping after the execution. no extra log.
+        steps {
+            script {
+                def User_Name = 'root'  // Replace with actual username
+                    def Password = 'root'  // Replace with actual password
+                    def Host_IP = '192.168.1.229'  // Replace with actual IP address of Server 2
+                    // def file_to_copy = '${env.TARGET_FOLDER}/target/*.jar'  // Replace with the actual file path on Server 2
+                    // def destination_path = '/HRMS/moduleJar/'
+                    def Port = '4000'  // Replace with the desired destination path on Server 1
+                sh """
+
+                # Start HRMS Server using nohup with sshpass
+                nohup sshpass -p '${Password}' ssh -o StrictHostKeyChecking=no -p ${Port} ${User_Name}@${Host_IP} 'nohup java -jar /HRMS/SERVER.jar > /HRMS/Server.log 2>&1 &' &
+
+                # Start HRMS Client using nohup with sshpass
+                nohup sshpass -p '${Password}' ssh -o StrictHostKeyChecking=no -p ${Port} ${User_Name}@${Host_IP} 'cd /HRMS/Client && nohup npm start -- --host > /HRMS/Client.log 2>&1 &' &
+                echo "Services restarted"
+                """
+            }
+        }
+    }
+}
+}

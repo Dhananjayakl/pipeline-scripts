@@ -1,0 +1,571 @@
+@Library("jenkins-shared-library") _
+
+def Sonar_Project // Initialize Sonar_Project
+
+pipeline {
+    agent {
+        label 'JENKINS-AGENT'
+    }
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
+    parameters {
+        choice(name: 'Project', choices: ['Client', 'Server', 'Module'], description: 'Project to Scan')
+        choice(name: 'Branch_Name', choices: ['main', 'development', ], description: 'Branch to build')
+    }
+
+    environment {
+        
+        Sonar_Project = ''  // Empty initial value, will be set in script blocks
+    }
+
+    stages {
+        stage('WorksSpace_Assign') {
+            steps {
+                script {
+                    if (params.Project == 'Module') {
+                        env.WorkspaceDirectory = params.Module_Type
+                        echo "Selected Module: ${params.Module_Type}"
+                    } else {
+                        env.WorkspaceDirectory = params.Project
+                        echo "Selected Project Type: ${params.Project}"
+                    }
+                }
+            }
+        }
+
+        stage('Workspace_Cleanup') {
+            steps {
+                script {
+                    echo "Workspace directory: ${env.WorkspaceDirectory}"
+                    dir("${env.WorkspaceDirectory}") {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+        
+        stage('Sonar_Project_assign') {
+            steps {
+                script {
+                    // Determine which repository URL to use based on Project parameter
+                    switch (params.Project) {
+                        case 'Client':
+                            Sonar_Project = 'Client'
+                            break
+                        case 'Server':
+                            Sonar_Project = 'Server'
+                            break
+                        case 'Module':
+                            echo "Module selected. Prompting for sub-module..."
+                            switch (params.Module_Type) {
+                                case 'grc':
+                                    Sonar_Project = "grc"
+                                    break
+                                case 'issue':
+                                    Sonar_Project = "issue"
+                                    break
+                                case 'risk':
+                                    Sonar_Project = "risk"
+                                    break
+                                case 'controltesting':
+                                    Sonar_Project = "controltesting"
+                                    break
+                                case 'businessresilience':
+                                    Sonar_Project = "businessresilience"
+                                    break
+                                case 'survey':
+                                    Sonar_Project = "survey"
+                                    break
+                                case 'admin':
+                                    Sonar_Project = "admin"
+                                    break
+                                case 'engine':
+                                    Sonar_Project = "engine"
+                                    break
+                                case 'attendance':
+                                    Sonar_Project = "attendance"
+                                    break
+                                case 'document':
+                                    Sonar_Project = "document"
+                                    break
+                                case 'employee':
+                                    Sonar_Project = "employee"
+                                    break
+                                case 'incident':
+                                    Sonar_Project = "incident"
+                                    break
+                                case 'keyshield':
+                                    Sonar_Project = "keyshield"
+                                    break
+                                case 'leave':
+                                    Sonar_Project = "leave"
+                                    break
+                                case 'monitor':
+                                    Sonar_Project = "monitor"
+                                    break
+                                case 'project':
+                                    Sonar_Project = "project"
+                                    break
+                                case 'resolve':
+                                    Sonar_Project = "resolve"
+                                    break
+                                case 'syscare':
+                                    Sonar_Project = "syscare"
+                                    break
+                                case 'vendor':
+                                    Sonar_Project = "vendor"
+                                    break
+                                case 'internalaudit':
+                                    Sonar_Project = "internalaudit"
+                                    break
+                                case 'loss':
+                                    Sonar_Project = "loss"
+                                    break
+                                case 'crm':
+                                    Sonar_Project = "crm"
+                                    break
+                                case 'za':
+                                    Sonar_Project = "za"
+                                    break                
+                                default:
+                                    error "Unsupported SubModule parameter value: ${params.Module_Type}"
+                            }
+                            break
+                        default:
+                            error "Unsupported Project parameter value: ${params.Project}"
+                    }
+                    
+                }
+            }
+        }
+
+
+        stage('Git_Repo_Clone') {
+            steps {
+                script {
+                    dir("${env.WorkspaceDirectory}") {
+                    echo "Cloning repository based on Module_Name parameter..."
+
+                    // Using the Git plugin to clone the repository
+                    git branch: "${params.Branch_Name}", url: "https://github.com/ProGReC-APPS/${WorkspaceDirectory}.git", credentialsId: 'Github-ProGReC-APPS'
+                }
+                }
+            }
+        }
+
+        stage('Build/npm install or Maven build') {
+            steps {
+                script {
+                    sh """
+                        #!/bin/bash
+                        # Main logic
+                        if [ "${params.Project}" = "Server" ]; then
+                            echo "${params.Project}"
+                            ls -R
+                            cd "${params.Project}/platform/SERVER"
+                            mvn clean package
+                            echo "Module jar build success"
+
+                        elif [ "${params.Project}" = "Module" ]; then
+                            found=0
+                            pwd
+                            echo "${params.Module_Type}"
+                            for file in "${params.Module_Type}/server/*"; do
+                                if [ \$(basename \$file) = "pom.xml" ]; then
+                                    found=1
+                                    break  # Stop after finding the first pom.xml
+                                fi
+                            done
+
+                            if [ \$found -ne 0 ]; then
+                                echo "Module code building"
+                                echo "Performing ${params.Module_Type}"
+                                cd "${params.Module_Type}/server"
+                                mvn clean package
+                                echo "Module jar build success"
+                            else
+                                echo "No pom.xml found in the server directory"
+                            fi
+                        else
+                            echo "Invalid Project parameter value"
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('SonarQube_analysis') {
+            steps {
+                script {
+                    dir("${env.WorkspaceDirectory}") {
+                    // Use the SonarQube scanner
+                    def scannerHome = tool 'SonarQube-Scanner' // Ensure this matches your installation
+                    withSonarQubeEnv('SonarQube_Server') { // The name you gave in Step 2
+                        // Run the SonarQube analysis
+                        // sh "${scannerHome}/bin/sonar-scanner -Dproject.settings=sonar-project.properties"
+                        sh "${scannerHome}/bin/sonar-scanner -Dproject.settings=sonar-project.properties"
+                    }
+                    }
+                }
+            }
+        }
+
+        stage('API_Date_Fetch') {
+            steps {
+                script {
+                    dir("${env.WorkspaceDirectory}") {
+                    def currentDate = new Date().format("yyyy-MM-dd")
+                    echo "Current Date: ${currentDate}"
+                    echo "Sonar Project: ${Sonar_Project}"
+
+                    // Use withEnv to set environment variable for shell script
+                    withEnv(["Sonar_Project=${Sonar_Project}"]) {
+                        sh """
+                            #!/bin/bash
+                            echo "Waiting for 2 seconds..."
+                            sleep 2
+
+                            # Define the SonarQube URL and token
+                           # sonaruri="http://192.168.1.227:9000"
+                            #token="squ_2aea5adff0bc1a63b64f686cfd61ca5fa73b5256"
+
+                            sonaruri="http://192.168.1.229:9011"
+                            token="sqa_79baf4356b44635732ba0bcea01487cfb9bda66e"
+
+                            # Define the current date and format it for URL
+                            currentDate=\$(date +'%Y-%m-%d')
+
+                            # Fetch the SonarQube project from environment variable
+                            sonarProject="\${Sonar_Project}"
+
+                            # Check and output the project
+                            if [ -z "\$sonarProject" ]; then
+                                echo "Sonar_Project environment variable is not set."
+                            else
+                                echo "Fetching data for project: \$sonarProject"
+                            fi
+
+                            # Curl command body without date filter
+                            body="components=\$sonarProject&s=FILE_LINE&createdAfter=\$currentDate&issueStatuses=CONFIRMED,OPEN&ps=500&facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&additionalFields=_all&timeZone=Asia/Calcutta"
+                            uri="\$sonaruri/api/issues/search?\$body"
+
+                            # Make the API call using curl
+                            response=\$(curl -s -H "Content-Type: application/json" -H "Authorization: Bearer \$token" "\$uri")
+
+                            # Define the path to the JSON file
+                            jsonFilePath="API.json"
+
+                            # Save the response to the JSON file
+                            echo "\$response" > "\$jsonFilePath"
+
+                            # Output the file path for verification
+                            echo "API response saved to: \$jsonFilePath"
+                        """
+                    }
+                    }
+                }
+            }
+        }
+
+
+stage('Generate_Report_html') {
+    steps {
+        script {
+            def currentDate = new Date().format("yyyy-MM-dd")
+            def date = new Date().format("yyyy-MM-dd_HH-mm")
+            echo "${currentDate}"
+            def outputHtmlPath = "${env.WorkspaceDirectory}/${env.WorkspaceDirectory}-Sonar-${date}.html"
+            def jsonFilePath = "${env.WorkspaceDirectory}/API.json"
+
+            // Execute the shell script with embedded Node.js code
+            sh """
+            #!/bin/bash
+
+            # Export variables for Node.js
+            export currentDate="${currentDate}"
+            export outputHtmlPath="${outputHtmlPath}"
+            export jsonFilePath="${jsonFilePath}"
+
+            # Check if JSON file exists
+            if [ ! -f "\$jsonFilePath" ]; then
+                echo "JSON file not found: \$jsonFilePath"
+                exit 1
+            fi
+
+            # Run Node.js code to generate the report
+            node -e '
+            const fs = require("fs");
+
+            // Load JSON file
+            const jsonFilePath = process.env.jsonFilePath || "API.json";
+            const currentDate = process.env.currentDate || new Date().toISOString().split("T")[0];
+            let outputHtmlPath = process.env.outputHtmlPath || "123.html";
+
+            // Function to generate HTML content
+            function generateHtmlReport(issues) {
+                //const sonarQubeUrl = "http://192.168.1.227:9000";
+                 const sonarQubeUrl = "http://192.168.1.229:9011";
+                let htmlContent = "<html>" +
+                    "<head>" +
+                    "<title>Scan Report - " + currentDate + "</title>" +
+                    "<style>" +
+                    "body { font-family: Arial, sans-serif; color: #333; background-color: #f4f4f9; }" +
+                    "h1 { color: #333; text-align: center; margin-bottom: 20px; font-size: 24px; }" +
+                    "h2 { color: #333; margin-bottom: 20px; font-size: 24px; }" +
+                    "table { width: 100%; border-collapse: collapse; border: 1px solid #000000; margin-bottom: 20px; }" +
+                    "th, td { border: 1px solid #ddd; padding: 10px; text-align: left; max-width: 150px; word-wrap: break-word; }" +  // Add max-width and word-wrap to limit and wrap text
+                    "th { background-color: #5D5CDA; color: white; font-size: 20px; }" +
+                    "tr:nth-child(even) { background-color: #f9f9f9; }" +
+                    "tr:hover { background-color: #f1f1f1; }" +
+                    "a { color: #000000; text-decoration: underline; cursor: pointer; font-weight: bold; }" +
+                    "a:hover { color: #333; text-decoration: underline; }" +
+                    ".no-issues { text-align: center; font-size: 18px; color: #555; margin-top: 20px; }" +
+                    "</style>"
+                    +
+                    "</head>" +
+                    "<body>" +
+                    "<h1>Scan Report </h1>" +
+                    "<h2>Project Name - " + issues[0].project + "</h2>" +
+                    "<h2>Created Date - " + issues[0].creationDate + "</h2>" +
+                    "<table>" +
+                    "<tr>" +
+                    "<th>Key</th><th>Severity</th><th>Component</th>" +
+                    "<th>Line</th><th>Message</th><th>Author</th><th>Update Date</th>" +
+                    "<th>Status</th><th>Type</th>" +
+                    "</tr>";
+
+                for (let issue of issues) {
+                    const issueUrl = sonarQubeUrl + "/project/issues?id=" + encodeURIComponent(issue.project) + "&issues=" + encodeURIComponent(issue.key);
+                    htmlContent += "<tr>" +
+                        "<td><a href=" + issueUrl + " target=_blank>" + issue.key + "</a></td>" +
+                        "<td>" + issue.severity + "</td><td>" + issue.component + "</td>" +
+                        "<td>" + (issue.line || "") + "</td><td>" + issue.message + "</td><td>" + (issue.author || "") + "</td>"+
+                        "<td>" + (issue.updateDate || "") + "</td><td>" + issue.status + "</td><td>" + issue.type + "</td>" +
+                        "</tr>";
+                }
+
+                htmlContent += "</table></body></html>";
+                return htmlContent;
+            }
+
+            // Parse JSON data and filter issues
+            try {
+                const jsonData = JSON.parse(fs.readFileSync(jsonFilePath, "utf-8"));
+                const issues = jsonData.issues.filter(issue => issue.creationDate && issue.creationDate.includes(currentDate));
+
+                // Generate and write HTML report
+                let htmlContent;
+                if (issues.length > 0) {
+                    htmlContent = generateHtmlReport(issues);
+                } else {
+                    htmlContent = "<html>" +
+                        "<head><title>Scan Report - " + currentDate + "</title></head>" +
+                        "<body><h1>Scan Report - " + currentDate + "</h1>" +
+                        "<p class='no-issues'>There is no new code available to scan.</p>" +
+                        "</body></html>";
+                }
+                fs.writeFileSync(outputHtmlPath, htmlContent);
+                console.log("HTML report written to " + outputHtmlPath);
+            } catch (error) {
+                console.error("Error processing JSON data:", error);
+                process.exit(1);
+            }
+            '
+            """
+        }
+    }
+}
+
+        stage('Sonar_email') {
+            steps {
+                script {
+                        // def currentDate = new Date().format("yyyy-MM-dd_HH-mm")
+                        def date = new Date().format("yyyy-MM-dd_HH-mm")
+                        def report = "${env.WorkspaceDirectory}-Sonar-${env.timestamp}.html"
+                        dir("${env.WorkspaceDirectory}") {
+                                    // Email the HTML report
+                            emailext(
+                                subject: "HTML Report from Jenkins Job: pipeline",
+                                body: """<p>Hi,</p>
+                                        <p>The HTML report for the job <b>pipeline</b> is attached.</p>
+                                        <p>Regards,<br>Jenkins</p>""",
+                                to: 'dhananjaya.k@probuddysoftware.com',
+                                attachFiles: '\${report}',
+                                mimeType: 'text/html'
+                            )
+                        }
+                    }
+                }
+            }
+
+
+
+
+
+        stage('Upload_to_Nexus') {
+            steps {
+                script {
+                        def currentDate = new Date().format("yyyy-MM-dd_HH-mm")
+                        dir("${env.WorkspaceDirectory}") {
+                            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                                // Use environment variables instead of direct interpolation
+                                sh """
+                                    echo "${currentDate}"
+                                    echo "${env.WorkspaceDirectory}"
+                                    curl -u "\$USERNAME:\$PASSWORD" --upload-file "${env.WorkspaceDirectory}-Sonar-${currentDate}.html" "https://rndnexus.progrec.com/repository/Sonar-Reports/${env.WorkspaceDirectory}/${env.WorkspaceDirectory}-Sonar-${currentDate}.html"
+                                """
+                        }
+                    }
+                }
+            }        
+        }
+
+     stage('Publish Reports') {
+            steps {
+                script {
+                    def currentDate = new Date().format("yyyy-MM-dd_HH-mm")
+                    def scanReportDir = "${WorkspaceDirectory}/Scan_Report"
+                    def sonarHtmlReport = "${WorkspaceDirectory}/${WorkspaceDirectory}-Sonar-*.html"
+                    
+                    // Create the Scan_Report directory
+                    sh """
+                    mkdir -p ${scanReportDir}
+                    cp ${WorkspaceDirectory}/API.json ${scanReportDir}/
+                    # cp ${WorkspaceDirectory}/htmlpublisher-wrapper.html ${scanReportDir}/
+                    cp ${sonarHtmlReport} ${scanReportDir}/
+                    """
+
+                    // Publish the HTML report
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: false,
+                        keepAll: true,
+                        reportDir: scanReportDir,
+                        reportFiles: "${WorkspaceDirectory}-Sonar-${currentDate}.html",
+                        reportName: 'Scan Report',
+                        reportTitles: '',
+                        useWrapperFileDirectly: true    
+                    ])
+                }
+            }
+        }
+    }
+}
+
+// stage('Upload to SharePoint') {
+//     steps {
+//         script {
+//            // dir("${env.WorkspaceDirectory}") {
+//             def psScriptContent = '''
+//                     # Define variables
+//                     $sharepointUrl = "https://probuddy.sharepoint.com/sites/SonarQube-Reports"
+//                     $tenantId = "2aaf8b34-f479-4550-888a-cc73fcf58c4e"
+//                     $clientId = "3f745c23-ba47-42f4-bec3-6e978008b328"
+//                     $certificatePath = "C:\\Sharepoint-Certificate\\PnPCertificate.pfx"
+//                     $certificatePassword = "Admin@4321"
+
+//                     # Get the present working directory where the script is running
+//                     $workspaceDirectory = Get-Location
+
+//                     # Extract the folder name from the present working directory
+//                     $folderName = Split-Path -Leaf $workspaceDirectory
+
+//                     # Define the SharePoint folder path
+//                     $sharePointFolder = "Shared Documents/$folderName"
+
+//                     # Display the present working directory and SharePoint folder
+//                     Write-Output "Present working directory: $workspaceDirectory"
+//                     Write-Output "Present shared directory: $sharePointFolder"
+
+//                     # Import the PnP PowerShell module
+//                     Write-Output "Importing PnP PowerShell module..."
+//                     Import-Module PnP.PowerShell -ErrorAction Stop
+//                     Write-Output "PnP PowerShell module imported successfully."
+
+//                     # Find the .html file in the workspace directory
+//                     Write-Output "Searching for .html file in '$workspaceDirectory'..."
+//                     $localFilePath = Get-ChildItem -Path $workspaceDirectory -Filter "*.html" | Select-Object -First 1 -ExpandProperty FullName
+
+//                     if (-not $localFilePath) {
+//                         Write-Error "No .html file found in the workspace directory."
+//                         exit 1
+//                     }
+
+//                     Write-Output "Found .html file: $localFilePath"
+
+//                     # Connect to SharePoint Online using certificate
+//                     Write-Output "Connecting to SharePoint Online..."
+//                     try {
+//                         Connect-PnPOnline -Url $sharepointUrl -ClientId $clientId -Tenant $tenantId -CertificatePath $certificatePath -CertificatePassword (ConvertTo-SecureString -String $certificatePassword -Force -AsPlainText) -ErrorAction Stop
+//                         Write-Output "Connected to SharePoint Online successfully."
+//                     } catch {
+//                         Write-Error "Failed to connect to SharePoint Online: $_"
+//                         exit 1
+//                     }
+
+//                     # Verify if the folder exists in SharePoint
+//                     Write-Output "Checking if the folder '$sharePointFolder' exists in SharePoint..."
+//                     try {
+//                         $folder = Get-PnPFolder -Url $sharePointFolder -ErrorAction Stop
+//                         if ($null -eq $folder) {
+//                             Write-Error "Folder '$sharePointFolder' does not exist in SharePoint."
+//                             Disconnect-PnPOnline
+//                             exit 1
+//                         } else {
+//                             Write-Output "Folder '$sharePointFolder' exists in SharePoint."
+//                         }
+//                     } catch {
+//                         Write-Error "Failed to find folder '$sharePointFolder': $_"
+//                         Disconnect-PnPOnline
+//                         exit 1
+//                     }
+
+//                     # Upload file to SharePoint
+//                     Write-Output "Uploading file to SharePoint..."
+//                     try {
+//                         Add-PnPFile -Path $localFilePath -Folder $sharePointFolder -ErrorAction Stop
+//                         Write-Output "File uploaded successfully to '$sharePointFolder'."
+//                     } catch {
+//                         Write-Error "Failed to upload file: $_"
+//                         Disconnect-PnPOnline
+//                         exit 1
+//                     }
+
+//                     # Disconnect from SharePoint Online
+//                     Write-Output "Disconnecting from SharePoint Online..."
+//                     Disconnect-PnPOnline
+//                     Write-Output "Disconnected from SharePoint Online."
+//             '''
+
+//            def psScriptPath = "${env.WorkspaceDirectory}\\temp.ps1"
+
+//             // Write the PowerShell script content to a temporary file
+//             writeFile file: psScriptPath, text: psScriptContent
+
+//             // Execute the PowerShell script
+//             bat """
+//             @echo off
+//             cd ${WorkspaceDirectory}
+//             REM Define the path to PowerShell 7 executable
+//             set "POWERSHELL7_PATH=C:\\PowerShell-7\\PowerShell\\7\\pwsh.exe"
+
+//             REM Debugging: Print the PowerShell path and script path
+//             echo Executing PowerShell script using: "%POWERSHELL7_PATH%"
+
+//             REM Execute the PowerShell script using PowerShell 7
+//             "%POWERSHELL7_PATH%" -File "temp.ps1"
+
+//             REM Check if PowerShell script execution was successful
+//             if errorlevel 1 (
+//                 echo PowerShell script failed with exit code %ERRORLEVEL%.
+//                 exit /b %ERRORLEVEL%
+//             )
+//             """
+//         }
+//     }
+// }
+// }
+

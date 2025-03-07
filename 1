@@ -1,0 +1,40 @@
+pipeline {
+    agent any
+    environment {
+        MAVEN_HOME = tool 'Maven' // Ensure Maven is configured
+    }
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'qa'], description: 'Select the Environment')
+    }
+    stages {
+        stage('Prepare Configuration') {
+            steps {
+                script {
+                    // Fetch the appropriate managed file based on the environment
+                    def configFileId = params.ENVIRONMENT == 'qa' ? 'qa-datasource' : 'dev-datasource'
+                    def datasourceConfig = managedFile id: configFileId, variable: 'DATASOURCE_FILE'
+
+                    // Inject the environment-specific variables
+                    sh """
+                        source $DATASOURCE_FILE
+                        export DATASOURCE_URL=$(grep 'url:' $DATASOURCE_FILE | awk '{print \$2}')
+                        export DATASOURCE_USERNAME=$(grep 'username:' $DATASOURCE_FILE | awk '{print \$2}')
+                        export DATASOURCE_PASSWORD=$(grep 'password:' $DATASOURCE_FILE | awk '{print \$2}')
+                        export DATASOURCE_DRIVER=$(grep 'driver-class-name:' $DATASOURCE_FILE | awk '{print \$2}')
+                    """
+                }
+            }
+        }
+        stage('Build Jar') {
+            steps {
+                sh """
+                    ${MAVEN_HOME}/bin/mvn clean package \
+                    -Dspring.datasource.url=$DATASOURCE_URL \
+                    -Dspring.datasource.username=$DATASOURCE_USERNAME \
+                    -Dspring.datasource.password=$DATASOURCE_PASSWORD \
+                    -Dspring.datasource.driver-class-name=$DATASOURCE_DRIVER
+                """
+            }
+        }
+    }
+}

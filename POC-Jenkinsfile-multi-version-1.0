@@ -1,0 +1,43 @@
+node('JENKINS-AGENT') {
+    properties([
+        parameters([
+            [
+                $class: 'ChoiceParameter',
+                name: 'SPORTS',
+                choices: ['Football', 'Tennis', 'Wakeboard'],
+                description: 'Select one or more sports'
+            ],
+            [
+                $class: 'CascadeChoiceParameter',
+                name: 'TEAMS',
+                choiceType: 'SINGLE_SELECT',
+                script: [
+                    $class: 'GroovyScript',
+                    script: [
+                        groovyScript: """
+                            def sportsToTeams = [
+                                'Football': ['Rumelner TV', 'FC Rumeln'],
+                                'Tennis': ['Tennisclub Rumeln-Kaldenhausen e. V.', 'Oppumer TC'],
+                                'Wakeboard': ['WSC Duisburg Rheinhausen']
+                            ]
+                            def selectedSports = params.SPORTS.tokenize(',')
+                            def availableTeams = selectedSports.collectMany { sport -> 
+                                sportsToTeams[sport] ?: [] 
+                            }
+                            return availableTeams ?: ['No teams available']
+                        """,
+                        fallbackScript: "return ['No teams available']"
+                    ]
+                ],
+                description: 'Select a team based on selected sports'
+            ]
+        ])
+    ])
+    
+    stage('Print Selected Options') {
+        steps {
+            echo "Selected Sports: ${params.SPORTS}"
+            echo "Selected Team: ${params.TEAMS}"
+        }
+    }
+}

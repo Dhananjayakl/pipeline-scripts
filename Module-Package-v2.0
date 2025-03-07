@@ -1,0 +1,886 @@
+@Library("jenkins-shared-library") _
+
+pipeline {
+    agent {
+        label 'JENKINS-AGENT'
+    }
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
+    environment {
+        timestamp = new Date().format("dd-MM-yyyy_HH:mm", TimeZone.getTimeZone('Asia/Kolkata'))
+    }
+
+    parameters {
+        choice(name: 'Customer', choices: ['Progrec-APPS', 'AEON-Credit'], description: 'Select the target customer')
+        string(name: 'Build_Version', defaultValue: '1.0', description: 'Specify the version to build')
+        string(name: 'Start_Revision', defaultValue: 'TAIL', description: 'Specify the start revision for build')
+        string(name: 'End_Revision', defaultValue: 'HEAD', description: 'Specify the end revision for build')
+        choice(name: 'Branch', choices: ['main', 'development'], description: 'Branch to build')
+        // choice(name: 'Module', choices: ['admin', 'engine', 'vendor'], description: 'Module to build')
+    }
+
+    stages {
+        stage('Sonar_Project_Assign') {
+            steps {
+                script {
+                    switch (params.Customer) {
+                        case 'Progrec-APPS':
+                            switch (params.Module) {
+                                case 'grc':
+                                    Module_Name = "grc"
+                                    Sonar_Project = "grc"
+                                    break
+                                case 'issue':
+                                    Module_Name = "issue"
+                                    Sonar_Project = "issue"
+                                    break
+                                case 'risk':
+                                    Module_Name = "risk"
+                                    Sonar_Project = "risk"
+                                    break
+                                case 'controltesting':
+                                    Module_Name = "controltesting"
+                                    Sonar_Project = "controltesting"
+                                    break
+                                case 'businessresilience':
+                                    Module_Name = "businessresilience"
+                                    Sonar_Project = "businessresilience"
+                                    break
+                                case 'survey':
+                                    Module_Name = "survey"
+                                    Sonar_Project = "survey"
+                                    break
+                                case 'engine':
+                                    Module_Name = "engine"
+                                    Sonar_Project = "engine"
+                                    break
+                                case 'admin':
+                                    Module_Name = "admin"
+                                    Sonar_Project = "admin"
+                                    break
+                                case 'attendance':
+                                    Module_Name = "attendance"
+                                    Sonar_Project = "attendance"
+                                    break
+                                case 'incident':
+                                    Module_Name = "incident"
+                                    Sonar_Project = "incident"
+                                    break
+                                case 'monitor':
+                                    Module_Name = "monitor"
+                                    Sonar_Project = "monitor"
+                                    break
+                                case 'project':
+                                    Module_Name = "project"
+                                    Sonar_Project = "project"
+                                    break
+                                case 'document':
+                                    Module_Name = "document"
+                                    Sonar_Project = "document"
+                                    break
+                                case 'employee':
+                                    Module_Name = "employee"
+                                    Sonar_Project = "employee"
+                                    break
+                                case 'keyshield':
+                                    Module_Name = "keyshield"
+                                    Sonar_Project = "keyshield"
+                                    break
+                                case 'leave':
+                                    Module_Name = "leave"
+                                    Sonar_Project = "leave"
+                                    break
+                                case 'resolve':
+                                    Module_Name = "resolve"
+                                    Sonar_Project = "resolve"
+                                    break
+                                case 'syscare':
+                                    Module_Name = "syscare"
+                                    Sonar_Project = "syscare"
+                                    break
+                                case 'vendor':
+                                    Module_Name = "vendor"
+                                    Sonar_Project = "vendor"
+                                    break
+                                case 'internalaudit':
+                                    Module_Name = "internalaudit"
+                                    Sonar_Project = "internalaudit"
+                                    break
+                                case 'loss':
+                                    Module_Name = "loss"
+                                    Sonar_Project = "loss"
+                                    break
+                                case 'crm':
+                                    Module_Name = "crm"
+                                    Sonar_Project = "crm"
+                                    break
+                                case 'za':
+                                    Module_Name = "za"
+                                    Sonar_Project = "za"
+                                    break              
+                                default:
+                                    error "Unsupported Module for Progrec-APPS: ${params.Module}"
+                            }
+                            break
+                        case 'AEON-Credit':
+                            switch (params.Module) {
+                                case 'admin':
+                                    Module_Name = "admin-AEON-Credit"
+                                    Sonar_Project = "admin"
+                                    break
+                                case 'engine':
+                                    Module_Name = "engine-AEON-Credit"
+                                    Sonar_Project = "engine"
+                                    break
+                                case 'vendor':
+                                    Module_Name = "vendor-AEON-Credit"
+                                    Sonar_Project = "vendor"
+                                    break
+                                default:
+                                    error "Unsupported Module for AEON-Credit: ${params.Module}"
+                            }
+                            break
+                        default:
+                            error "Unsupported Customer: ${params.Customer}"
+                    }
+                    echo "Assigned Git Module: ${Module_Name}"
+                }
+            }
+        }
+        
+        stage('Check_if_package_exists_Nexus') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                    sh """
+                        #!/bin/bash
+                        set +x 
+                        NEXUS_URL="https://rndnexus.progrec.com"
+                        REPO="Module-Objects"
+                        PACKAGE_NAME="${params.Customer}/${params.Instance}/${params.Module}/${params.Build_Version}/${params.Module}-${params.Build_Version}.zip"
+                        echo "\$PACKAGE_NAME"
+                        
+                        EXISTING_PACKAGE=\$(curl -s -u \$USERNAME:\$PASSWORD \\
+                            "\$NEXUS_URL/service/rest/v1/search/assets?repository=\$REPO&q=\$PACKAGE_NAME" | \\
+                            jq '.items[] | select(.path | contains("'"\$PACKAGE_NAME"'"))')
+                        
+                        if [ -n "\$EXISTING_PACKAGE" ]; then
+                            echo "Package \$PACKAGE_NAME already exists in Nexus. Skipping upload."
+                            exit 1
+                        else
+                            echo "Package \$PACKAGE_NAME does not exist."
+                            echo "Proceed to build package."
+                        fi
+                    """
+                }
+            }
+        }
+
+
+        stage('Workspace_Cleanup') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+
+        stage('Git_Repo_Clone') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                        echo "Cloning repository for module: ${Module_Name}"
+                        git branch: "${params.Branch}",
+                            url: "https://github.com/ProGReC-APPS/${Module_Name}.git",
+                            credentialsId: 'Github-ProGReC-APPS'
+                    }
+                }
+            }
+        }
+
+
+        stage('Determine_Start_Revision') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                    if (params.Start_Revision == 'TAIL') {
+                        def Initial_commit = sh(script: 'git rev-list --max-parents=0 HEAD', returnStdout: true).trim()
+                        env.Start_Revision = Initial_commit
+                    } else {
+                        env.Start_Revision = params.Start_Revision
+                    }
+                    echo "Revision: ${env.Start_Revision}"
+                }
+                }
+            }
+        }
+
+        stage('Git_Checkout') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                        sh """
+                            git checkout ${params.Branch}
+                            git checkout ${params.End_Revision}
+                            git diff --name-only ${env.Start_Revision} ${params.End_Revision} > diff_list.txt
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Create_Module_Folder_Structure') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                        sh """
+                            mkdir -p ${params.Module}/client ${params.Module}/objects ${params.Module}/scripts/pre ${params.Module}/scripts/post ${params.Module}/server
+                        """
+                    }
+                }
+            }
+        }
+
+//         // stage('Copy_Changes_to_Temp_Folder') {
+//         //     steps {
+//         //         script {
+//         //             dir("${params.Module_Name}") {
+//         //                 sh """
+//         //                     # cat diff_list.txt | grep -v '.gitignore' | grep -v '^server/' | xargs -I{} cp --parents {} ${params.Module_Name}
+//         //                       cat diff_list.txt | grep -v '.gitignore' | grep -v '^server/' | grep -v 'sonar-project.properties' | xargs -I{} cp --parents {} ${params.Module_Name}
+
+//         //                 """
+//         //             }
+//         //         }
+//         //     }
+//         // }
+
+stage('Copy_Changes_to_Temp_Folder') {
+    steps {
+        script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                sh """
+                    set +x
+                    # Initialize the ignored files log
+                    > not_existing_files.txt
+
+                    # Iterate over each file in diff_list.txt
+                    while IFS= read -r file; do
+                        # Skip unwanted files
+                        case "\$file" in
+                            '.gitignore'|*sonar-project.properties|server/*)
+                                continue
+                                ;;
+                        esac
+
+                        # Check if the file exists
+                        if [ -f "\$file" ]; then
+                            # Copy the file with its parent directory structure
+                            cp --parents "\$file" ${params.Module}
+                        else
+                            # Log the missing file
+                            echo "\$file" >> not_existing_files.txt
+                        fi
+                    done < diff_list.txt
+
+                    echo "Copy completed. Ignored files are listed in not_existing_files.txt."
+
+                    #copy sonar-project.properties file to module folder
+                    cp sonar-project.properties ${params.Module}/
+
+                """
+            }
+        }
+    }
+}
+
+
+        // stage('JSON_Update') {
+        //     steps {
+        //         script {
+        //             def jsonFilePath = "${pwd()}/${params.Customer}/${params.Instance}/${Module_Name}/report.json"
+        //             def module = params.Module
+        //             def version = params.Build_Version
+        //             def currentTime = new Date().format("yyyy-MM-dd'T'HH:mm:ss.SSSZ", TimeZone.getTimeZone('Asia/Kolkata'))
+        //             def Start_Commit_ID = params.Start_Revision
+        //             def End_Commit_ID = params.End_Revision
+        //             def Customer = params.Customer
+        //             def Branch = params.Branch
+        //             def Instance = params.Instance
+
+        //             def jsonContent = """
+        //             {
+        //                 "Module_Name": "${module}",
+        //                 "Build_Version": "${version}",
+        //                 "Time": "${currentTime}"
+        //                 "Start_Commit_ID": "${Start_Commit_ID}"
+        //                 "End_Commit_ID": "${End_Commit_ID}"
+        //                 "Customer": "${Customer}"
+        //                 "Branch": "${Branch}"
+        //                 "Instance": "${Instance}"
+
+        //             }
+        //             """
+                    
+        //             writeFile file: jsonFilePath, text: jsonContent
+        //         }
+        //     }
+        // }
+
+            stage('JSON_Update') {
+                steps {
+                    script {
+                        dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                        def jsonFilePath = "${pwd()}/report.json"
+                        def module = params.Module
+                        def version = params.Build_Version
+                        def currentTime = new Date().format("yyyy-MM-dd'T'HH:mm:ss.SSSZ", TimeZone.getTimeZone('Asia/Kolkata'))
+                        def Start_Commit_ID = env.Start_Revision
+                        def End_Commit_ID = params.End_Revision
+                        def Customer = params.Customer
+                        def Branch = params.Branch
+                        def Instance = params.Instance
+
+                        // Inline logic to fetch commit details
+                        def fetchCommitDetails = { commitId ->
+                            sh(
+                                script: "git show ${commitId} --pretty=format:'{\"Commit_ID\": \"%H\", \"Commit_Message\": \"%s\", \"Commit_Date\": \"%ci\"}' --no-patch",
+                                returnStdout: true
+                            ).trim()
+                        }
+
+                        // Fetch commit details for Start and End Commit IDs
+                        def startCommitDetails = fetchCommitDetails(Start_Commit_ID)
+                        def endCommitDetails = fetchCommitDetails(End_Commit_ID)
+
+                        // Prepare JSON content
+                        def jsonContent = """
+                        {
+                            "Module_Name": "${module}",
+                            "Build_Version": "${version}",
+                            "Time": "${currentTime}",
+                            "Start_Commit_ID": "${Start_Commit_ID}",
+                            "Start_Commit_Details": ${startCommitDetails},
+                            "End_Commit_ID": "${End_Commit_ID}",
+                            "End_Commit_Details": ${endCommitDetails},
+                            "Customer": "${Customer}",
+                            "Branch": "${Branch}",
+                            "Instance": "${Instance}"
+                        }
+                        """
+
+                        // Write JSON content to the file
+                        writeFile file: jsonFilePath, text: jsonContent
+
+
+                    }
+                }
+            }
+            }
+
+            stage('Generate_HTML_Report_Jenkins') {
+                steps {
+                    script {
+                        // Navigate to the specified directory
+                        dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                            // Path for the generated HTML file
+                            def htmlFilePath = "report.html"
+
+                            // Read the generated JSON content from the file
+                            def jsonContent = readFile("report.json")
+                            
+                            // Parse the JSON content
+                            def jsonData = readJSON text: jsonContent
+
+                            // Generate the HTML content for the report
+                            def htmlContent = """
+                                <!DOCTYPE html>
+                                <html lang="en">
+                                <head>
+                                    <meta charset="UTF-8">
+                                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                    <title>Module Build Report</title>
+                                    <style>
+                                        table {
+                                            width: 100%;
+                                            border-collapse: collapse;
+                                            margin-top: 20px;
+                                        }
+                                        table, th, td {
+                                            border: 1px solid black;
+                                        }
+                                        th, td {
+                                            padding: 8px;
+                                            text-align: left;
+                                        }
+                                    </style>
+                                </head>
+                                <body>
+                                    <h1>Module Package Build Report</h1>
+                                    <h2>Pipeline Name: Module Package</h2>
+                                    
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Attribute</th>
+                                                <th>Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td>Module Name</td>
+                                                <td>${jsonData.Module_Name}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Build Version</td>
+                                                <td>${jsonData.Build_Version}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Time</td>
+                                                <td>${jsonData.Time}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Start Commit ID</td>
+                                                <td>${jsonData.Start_Commit_ID}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Start Commit Message</td>
+                                                <td>${jsonData.Start_Commit_Details.Commit_Message}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Start Commit Date</td>
+                                                <td>${jsonData.Start_Commit_Details.Commit_Date}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>End Commit ID</td>
+                                                <td>${jsonData.End_Commit_ID}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>End Commit Message</td>
+                                                <td>${jsonData.End_Commit_Details.Commit_Message}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>End Commit Date</td>
+                                                <td>${jsonData.End_Commit_Details.Commit_Date}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Customer</td>
+                                                <td>${jsonData.Customer}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Branch</td>
+                                                <td>${jsonData.Branch}</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Instance</td>
+                                                <td>${jsonData.Instance}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </body>
+                                </html>
+                            """
+
+                            // Write the HTML content to the file
+                            writeFile(file: htmlFilePath, text: htmlContent)
+
+                            echo "HTML report generated at: ${htmlFilePath}"
+                        }
+                    }
+                }
+            }
+
+        stage('Nexus_report_upload_build_report') {
+            steps {
+                script {
+                        // def currentDate = new Date().format("yyyy-MM-dd_HH-mm")
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                                // Use environment variables instead of direct interpolation
+                                sh """
+                                    echo "${env.timestamp}"
+                                    curl -u "\$USERNAME:\$PASSWORD" --upload-file "report.html" "https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}/${params.Instance}/${params.Module}/${params.Build_Version}/${params.Module}-Build_report-${env.timestamp}.html"
+                                """
+                        }
+                    }
+                }
+            }        
+        }
+    
+
+        stage('Build_Jar_and_Copy_Changes') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                     // Check for server files in diff_list.txt
+                    def serverFilesFound = sh(script: "grep -q '^server/' diff_list.txt", returnStatus: true)
+
+                    if (serverFilesFound == 0) {
+                        // If grep found server files (exit code 0), execute the build commands
+                        sh """
+                            if [ -f server/pom.xml ]; then
+                                cd server && mvn package && cd ..
+                                # cp server/target/*.jar ${params.Module}/server/${params.Module}.jar
+                                cp -r server/ ${params.Module}/
+                            else
+                                echo "No POM file exists in server"
+                            fi
+                        """
+                    } else {
+                        // If no server files are found, log the message
+                        echo "No changes in server"
+                    }
+                    }
+                }
+            }
+        }
+
+        stage('SonarQube_analysis') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}/${params.Module}") {
+                    // Use the SonarQube scanner
+                    def scannerHome = tool 'SonarQube-Scanner' // Ensure this matches your installation
+                    withSonarQubeEnv('SonarQube_Server') { // The name you gave in Step 2
+                        // Run the SonarQube analysis
+                        // sh "${scannerHome}/bin/sonar-scanner -Dproject.settings=sonar-project.properties"
+                        sh "${scannerHome}/bin/sonar-scanner -Dproject.settings=sonar-project.properties"
+                    }
+
+
+                    }
+                }
+            }
+        }
+
+// stage('SonarQube_analysis') {
+//     steps {
+//         script {
+//             dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+//                 def scannerHome = tool 'SonarQube-Scanner'
+
+//                 if (!fileExists('diff_list.txt')) {
+//                     error "File 'diff_list.txt' not found. Please check your pipeline setup."
+//                 }
+
+//                 def serverFilesFound = sh(script: "grep -q '^server/' diff_list.txt", returnStatus: true)
+                
+//                 def sonarCommand = """
+//                     ${scannerHome}/bin/sonar-scanner \
+//                     -Dsonar.projectKey=${params.Module} \
+//                     -Dsonar.projectName=${params.Module} \
+//                     -Dsonar.projectVersion=1.0 \
+//                     -Dsonar.sourceEncoding=UTF-8
+//                     -Dsonar.sources=.\${params.Module}
+//                 """
+//                 if (serverFilesFound == 0) {
+//                     echo "Server changes detected. Running analysis on server files."
+//                     sonarCommand += " -Dsonar.java.binaries=.\${params.Module}/server/target/classes -Dsonar.java.libraries=.\${params.Module}/server/target/*.jar"
+
+
+//                 } else {
+//                     echo "No server changes detected. Running generic analysis."
+//                     // sonarCommand += " -Dsonar.sources=.\${params.Module}"
+//                 }
+
+//                 withSonarQubeEnv('SonarQube_Server') {
+//                     sh sonarCommand
+//                 }
+//             }
+//                 // copy module.jar & delete the server src & class files
+//                     sh """
+//                     cp ${params.Module}/server/target/*.jar ${params.Module}/server/${params.Module}.jar
+
+//                     # delete the src ,cass files
+//                     find ${params.Module}/server -mindepth 1 ! -name '${params.Module}.jar' -exec rm -rf {} +
+//                     """
+//         }
+//     }
+// }
+
+stage('API_Date_Fetch') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                    def currentDate = new Date().format("yyyy-MM-dd")
+                    echo "Current Date: ${currentDate}"
+                    echo "Sonar Project: ${Sonar_Project}"
+
+                    // Use withEnv to set environment variable for shell script
+                    withEnv(["Sonar_Project=${Sonar_Project}"]) {
+                        sh """
+                            #!/bin/bash
+                            
+                            echo "Waiting for 30 seconds..."
+                            sleep 10
+
+                            # Define the SonarQube URL and token
+                            sonaruri="http://192.168.1.227:9000"
+                            token="squ_2aea5adff0bc1a63b64f686cfd61ca5fa73b5256"
+
+                            # Define the current date and format it for URL
+                            currentDate=\$(date +'%Y-%m-%d')
+
+                            # Fetch the SonarQube project from environment variable
+                            sonarProject="\${Sonar_Project}"
+
+                            # Check and output the project
+                            if [ -z "\$sonarProject" ]; then
+                                echo "Sonar_Project environment variable is not set."
+                            else
+                                echo "Fetching data for project: \$sonarProject"
+                            fi
+
+                            # Curl command body without date filter
+                            body="components=\$sonarProject&s=FILE_LINE&createdAfter=\$currentDate&issueStatuses=CONFIRMED,OPEN&ps=500&facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&additionalFields=_all&timeZone=Asia/Calcutta"
+                            uri="\$sonaruri/api/issues/search?\$body"
+
+                            # Make the API call using curl
+                            response=\$(curl -s -H "Content-Type: application/json" -H "Authorization: Bearer \$token" "\$uri")
+
+                            # Define the path to the JSON file
+                            jsonFilePath="API.json"
+
+                            # Save the response to the JSON file
+                            echo "\$response" > "\$jsonFilePath"
+
+                            # Output the file path for verification
+                            echo "API response saved to: \$jsonFilePath"
+                        """
+                    }
+                    }
+                }
+            }
+        }
+
+stage('Generate_Report_html') {
+    steps {
+        script {
+            dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+            def currentDate = new Date().format("yyyy-MM-dd")
+            def date = new Date().format("yyyy-MM-dd_HH-mm")
+            echo "${currentDate}"
+            echo "${env.timestamp}"
+            def outputHtmlPath = "${params.Module}-Sonar-${env.timestamp}.html"
+            def jsonFilePath = "API.json"
+
+            // Execute the shell script with embedded Node.js code
+            sh """
+            #!/bin/bash
+            set +x
+            # Export variables for Node.js
+            export currentDate="${currentDate}"
+            export outputHtmlPath="${outputHtmlPath}"
+            export jsonFilePath="${jsonFilePath}"
+
+            # Check if JSON file exists
+            if [ ! -f "\$jsonFilePath" ]; then
+                echo "JSON file not found: \$jsonFilePath"
+                exit 1
+            fi
+
+            # Run Node.js code to generate the report
+            node -e '
+            const fs = require("fs");
+
+            // Load JSON file
+            const jsonFilePath = process.env.jsonFilePath || "API.json";
+            const currentDate = process.env.currentDate || new Date().toISOString().split("T")[0];
+            let outputHtmlPath = process.env.outputHtmlPath || "123.html";
+
+            // Function to generate HTML content
+            function generateHtmlReport(issues) {
+                const sonarQubeUrl = "http://192.168.1.227:9000";
+                let htmlContent = "<html>" +
+                    "<head>" +
+                    "<title>Scan Report - " + currentDate + "</title>" +
+                    "<style>" +
+                    "body { font-family: Arial, sans-serif; color: #333; background-color: #f4f4f9; }" +
+                    "h1 { color: #333; text-align: center; margin-bottom: 20px; font-size: 24px; }" +
+                    "h2 { color: #333; margin-bottom: 20px; font-size: 24px; }" +
+                    "table { width: 100%; border-collapse: collapse; border: 1px solid #000000; margin-bottom: 20px; }" +
+                    "th, td { border: 1px solid #ddd; padding: 10px; text-align: left; max-width: 150px; word-wrap: break-word; }" +  // Add max-width and word-wrap to limit and wrap text
+                    "th { background-color: #5D5CDA; color: white; font-size: 20px; }" +
+                    "tr:nth-child(even) { background-color: #f9f9f9; }" +
+                    "tr:hover { background-color: #f1f1f1; }" +
+                    "a { color: #000000; text-decoration: underline; cursor: pointer; font-weight: bold; }" +
+                    "a:hover { color: #333; text-decoration: underline; }" +
+                    ".no-issues { text-align: center; font-size: 18px; color: #555; margin-top: 20px; }" +
+                    "</style>"
+                    +
+                    "</head>" +
+                    "<body>" +
+                    "<h1>Scan Report </h1>" +
+                    "<h2>Project Name - " + issues[0].project + "</h2>" +
+                    "<h2>Created Date - " + issues[0].creationDate + "</h2>" +
+                    "<table>" +
+                    "<tr>" +
+                    "<th>Key</th><th>Severity</th><th>Component</th>" +
+                    "<th>Line</th><th>Message</th><th>Author</th><th>Update Date</th>" +
+                    "<th>Status</th><th>Type</th>" +
+                    "</tr>";
+
+                for (let issue of issues) {
+                    const issueUrl = sonarQubeUrl + "/project/issues?id=" + encodeURIComponent(issue.project) + "&issues=" + encodeURIComponent(issue.key);
+                    htmlContent += "<tr>" +
+                        "<td><a href=" + issueUrl + " target=_blank>" + issue.key + "</a></td>" +
+                        "<td>" + issue.severity + "</td><td>" + issue.component + "</td>" +
+                        "<td>" + (issue.line || "") + "</td><td>" + issue.message + "</td><td>" + (issue.author || "") + "</td>"+
+                        "<td>" + (issue.updateDate || "") + "</td><td>" + issue.status + "</td><td>" + issue.type + "</td>" +
+                        "</tr>";
+                }
+
+                htmlContent += "</table></body></html>";
+                return htmlContent;
+            }
+
+            // Parse JSON data and filter issues
+            try {
+                const jsonData = JSON.parse(fs.readFileSync(jsonFilePath, "utf-8"));
+                const issues = jsonData.issues.filter(issue => issue.creationDate && issue.creationDate.includes(currentDate));
+
+                // Generate and write HTML report
+                let htmlContent;
+                if (issues.length > 0) {
+                    htmlContent = generateHtmlReport(issues);
+                } else {
+                    htmlContent = "<html>" +
+                        "<head><title>Scan Report - " + currentDate + "</title></head>" +
+                        "<body><h1>Scan Report - " + currentDate + "</h1>" +
+                        "<p class='no-issues'>SonarQube found no new issues with this package</p>" +
+                        "</body></html>";
+                }
+                fs.writeFileSync(outputHtmlPath, htmlContent);
+                console.log("HTML report written to " + outputHtmlPath);
+            } catch (error) {
+                console.error("Error processing JSON data:", error);
+                process.exit(1);
+            }
+            '
+            """
+        }
+    }
+}
+}
+
+        stage('Sonar_email') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                    def report = "${params.Module}-Sonar-${env.timestamp}.html"                
+                    emailext(
+                        subject: "HTML Report from Jenkins Job: pipeline",
+                        body: """<p>Hi,</p>
+                                <p>The HTML report for the job <b>${params.Module}</b> is attached.</p>
+                                <p>Regards,<br>Jenkins</p>""",
+                        to: 'dhananjaya.k@probuddysoftware.com',
+                        attachmentsPattern: "${report}",
+                        mimeType: 'text/html',
+                        
+                    )
+                }
+                }
+            }
+        }
+
+
+        stage('Nexus_report_upload') {
+            steps {
+                script {
+                        // def currentDate = new Date().format("yyyy-MM-dd_HH-mm")
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                                // Use environment variables instead of direct interpolation
+                                sh """
+                                    echo "${env.timestamp}"
+                                    curl -u "\$USERNAME:\$PASSWORD" --upload-file "${params.Module}-Sonar-${env.timestamp}.html" "https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}/${params.Instance}/${params.Module}/${params.Build_Version}/${params.Module}-Sonar-${env.timestamp}.html"
+                                """
+                        }
+                    }
+                }
+            }        
+        }
+
+     stage('Publish Reports') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                    // def currentDate = new Date().format("yyyy-MM-dd_HH-mm")
+                    def scanReportDir = "Scan_Report"
+                    def sonarHtmlReport = "${params.Module}-Sonar-${env.timestamp}.html"
+                    
+                    // Create the Scan_Report directory
+                    sh """
+                    mkdir -p ${scanReportDir}
+                    cp API.json ${scanReportDir}/
+                    # cp htmlpublisher-wrapper.html ${scanReportDir}/
+                    cp ${sonarHtmlReport} ${scanReportDir}/
+                    """
+
+                    // Publish the HTML report
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: false,
+                        keepAll: true,
+                        reportDir: scanReportDir,
+                        reportFiles: "${params.Module}-Sonar-${env.timestamp}.html",
+                        reportName: 'Scan Report',
+                        reportTitles: '',
+                        useWrapperFileDirectly: true
+                    ])
+                }
+            }
+        }
+     }
+
+        stage('Zip_the_Module_Folder') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                    sh """
+                    set +x
+                    # copy module.jar & delete the server src & class files
+
+                    if [ -f server/pom.xml ]; then
+                    # search for pom file in server folder
+                        
+                    cp ${params.Module}/server/target/*.jar ${params.Module}/server/${params.Module}.jar 
+                    else
+                        echo "No POM file exists in server/No module jar for ${params.Module} "
+                    fi
+                 
+                    # delete the src ,cass files
+                    find ${params.Module}/server -mindepth 1 ! -name '${params.Module}.jar' -exec rm -rf {} +
+
+                    # delete the sonar-property file
+                    rm ${params.Module}/sonar-project.properties
+                    rm -rf "${params.Module}/.scannerwork"
+
+                    # Zip the folder
+                    zip -r ${params.Module}-${params.Build_Version}.zip ${params.Module}
+                    """
+                    }
+                }
+            }
+        }
+
+        stage('Upload_to_Nexus') {
+            steps {
+                script {
+                    dir("${params.Customer}/${params.Instance}/${Module_Name}") {
+                            withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                                // Use environment variables instead of direct interpolation
+                                sh """
+                                    curl -u "\$USERNAME:\$PASSWORD" --upload-file "${params.Module}-${params.Build_Version}.zip" "https://rndnexus.progrec.com/repository/Module-Objects/${params.Customer}/${params.Instance}/${params.Module}/${params.Build_Version}/${params.Module}-${params.Build_Version}.zip"
+                                """
+                        }
+                    }
+                }
+            }        
+        }
+    }
+}

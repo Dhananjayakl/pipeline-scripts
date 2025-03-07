@@ -1,0 +1,358 @@
+@Library("jenkins-shared-library") _
+
+ def repoUrl
+
+pipeline {
+    agent {
+        label 'JENKINS-AGENT'
+        // label ' JENKINS-AGENT-SSH'
+    }
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
+    parameters {
+        choice(name: 'Project', choices: ['Server', 'Module', 'Deployment'], description: 'Project to Build')
+        choice(name: 'Branch_Name', choices: ['main', 'development', ], description: 'Branch to build')
+    }
+
+    environment {
+        //Git repository URLs
+        Deployment_repo = 'https://github.com/ProGReC-APPS/Deployment_Maintenance.git'
+        Client_repo = 'https://github.com/ProGReC-APPS/Client.git'
+        Server_repo = 'https://github.com/ProGReC-APPS/Server.git'
+        Grc_repo = 'https://github.com/ProGReC-APPS/grc.git'
+        Issue_repo = 'https://github.com/ProGReC-APPS/issue.git'
+        Risk_repo = 'https://github.com/ProGReC-APPS/risk.git'
+        Controltesting_repo = 'https://github.com/ProGReC-APPS/controltesting.git'
+        Businessresilience_repo = 'https://github.com/ProGReC-APPS/businessresilience.git'
+        Survey_repo = 'https://github.com/ProGReC-APPS/survey.git'
+        Admin_repo = 'https://github.com/ProGReC-APPS/admin.git'
+        Engine_repo = 'https://github.com/ProGReC-APPS/engine.git'
+        Attendance_repo = 'https://github.com/ProGReC-APPS/attendance.git'
+        Document_repo = 'https://github.com/ProGReC-APPS/document.git'
+        Employee_repo = 'https://github.com/ProGReC-APPS/employee.git'
+        Incident_repo = 'https://github.com/ProGReC-APPS/incident.git'
+        Keyshield_repo = 'https://github.com/ProGReC-APPS/keyshield.git'
+        Leave_repo = 'https://github.com/ProGReC-APPS/leave.git'
+        Monitor_repo = 'https://github.com/ProGReC-APPS/monitor.git'
+        Project_repo = 'https://github.com/ProGReC-APPS/project.git'
+        Resolve_repo = 'https://github.com/ProGReC-APPS/resolve.git'
+        Syscare_repo = 'https://github.com/ProGReC-APPS/syscare.git'
+        Vendor_repo = 'https://github.com/ProGReC-APPS/vendor.git'
+        Internalaudit_repo = 'https://github.com/ProGReC-APPS/internalaudit.git'
+        Loss_repo = 'https://github.com/ProGReC-APPS/loss.git'
+        Crm_repo = 'https://github.com/ProGReC-APPS/crm.git'
+        Za_repo = 'https://github.com/ProGReC-APPS/za.git'
+    }
+
+    stages {
+        stage('WorksSpace_Assign') {
+            steps {
+                script {
+                    if (params.Project == 'Module') {
+                        env.WorkspaceDirectory = params.Module_Type
+                        echo "Selected Module: ${params.Module_Type}"
+                    } else {
+                        env.WorkspaceDirectory = params.Project
+                        echo "Selected Project Type: ${params.Project}"
+                    }
+                }
+            }
+        }
+
+        stage('Workspace_Cleanup') {
+            steps {
+                script {
+                    echo "Workspace directory: ${env.WorkspaceDirectory}"
+                    dir("${env.WorkspaceDirectory}") {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+
+        stage('Git_Repo_Clone') {
+            steps {
+                script {
+                    dir("${env.WorkspaceDirectory}") {
+                    echo "Cloning repository based on Project parameter..."
+                    // Determine which repository URL to use based on Project parameter
+                    switch (params.Project) {
+                        case 'Deployment':
+                            repoUrl = env.Deployment_repo
+                            break
+                        case 'Server':
+                            repoUrl = env.Server_repo
+                            
+                            break
+                        case 'Module':
+                            echo "Module selected. Prompting for sub-module..."
+                            switch (params.Module_Type) {
+                                case 'grc':
+                                    repoUrl = env.Grc_repo
+                                    
+                                    break
+                                case 'issue':
+                                    repoUrl = env.Issue_repo
+                                    
+                                    break
+                                case 'risk':
+                                    repoUrl = env.Risk_repo
+                                    
+                                    break
+                                case 'controltesting':
+                                    repoUrl = env.Controltesting_repo
+                                    
+                                    break
+                                case 'businessresilience':
+                                    repoUrl = env.Businessresilience_repo
+                                    
+                                    break
+                                case 'survey':
+                                    repoUrl = env.Survey_repo
+                                    
+                                    break
+                                case 'admin':
+                                    repoUrl = env.Admin_repo
+                                   
+                                    break
+                                case 'engine':
+                                    repoUrl = env.Engine_repo
+                                    
+                                    break
+                                case 'attendance':
+                                    repoUrl = env.Attendance_repo
+                                    
+                                    break
+                                case 'document':
+                                    repoUrl = env.Document_repo
+                                   
+                                    break
+                                case 'employee':
+                                    repoUrl = env.Employee_repo
+                                    
+                                    break
+                                case 'incident':
+                                    repoUrl = env.Incident_repo
+                                    
+                                    break
+                                case 'keyshield':
+                                    repoUrl = env.Keyshield_repo
+                                   
+                                    break
+                                case 'leave':
+                                    repoUrl = env.Leave_repo
+                                    
+                                    break
+                                case 'monitor':
+                                    repoUrl = env.Monitor_repo
+                                    
+                                    break
+                                case 'project':
+                                    repoUrl = env.Project_repo
+                                    
+                                    break
+                                case 'resolve':
+                                    repoUrl = env.Resolve_repo
+                                    
+                                case 'syscare':
+                                    repoUrl = env.Syscare_repo
+                                   
+                                    break
+                                case 'vendor':
+                                    repoUrl = env.Vendor_repo
+                                    
+                                    break
+                                case 'internalaudit':
+                                    repoUrl = env.Internalaudit_repo
+                                   
+                                    break
+                                case 'loss':
+                                    repoUrl = env.Loss_repo
+                                   
+                                    break
+                                case 'crm':
+                                    repoUrl = env.Crm_repo
+                                    
+                                    break
+                                case 'za':
+                                    repoUrl = env.Za_repo
+                                    
+                                    break                
+                                default:
+                                    error "Unsupported SubModule parameter value: ${params.Module_Type}"
+                            }
+                            break
+                        default:
+                            error "Unsupported Project parameter value: ${params.Project}"
+                    }
+                    
+                    // Using the Git plugin to clone the repository
+                    sh """
+                    mkdir ${env.WorkspaceDirectory}
+                    cd ${env.WorkspaceDirectory}
+                       """
+                    git branch: "${params.Branch_Name}", url: "${repoUrl}", credentialsId: 'Github-ProGReC-APPS'
+                }
+                }
+            }
+        }
+
+        stage('Build/npm install or Maven build') {
+            steps {
+                script {
+                    sh """
+                        #!/bin/bash
+                        # Main logic
+                        if [ "${params.Project}" = "Server" ]; then
+                            echo "${params.Project}"
+                            ls -R
+                            cd "${params.Project}/platform/SERVER"
+                            mvn clean package
+                            echo "Module jar build success"
+
+                        elif [ "${params.Project}" = "Deployment" ]; then
+                            echo "${params.Project}"
+                            ls -R
+                            cd "${params.Project}"
+                            mvn clean package
+                            echo "Module jar build success"    
+
+                        elif [ "${params.Project}" = "Module" ]; then
+                            found=0
+                            pwd
+                            echo "${params.Module_Type}"
+                            for file in "${params.Module_Type}/server/*"; do
+                                if [ \$(basename \$file) = "pom.xml" ]; then
+                                    found=1
+                                    break  # Stop after finding the first pom.xml
+                                fi
+                            done
+
+                            if [ \$found -ne 0 ]; then
+                                echo "Module code building"
+                                echo "Performing ${params.Module_Type}"
+                                cd "${params.Module_Type}/server"
+                                mvn clean package
+                                echo "Module jar build success"
+                            else
+                                echo "No pom.xml found in the server directory"
+                            fi
+                        else
+                            echo "Invalid Project parameter value"
+                        fi
+                    """
+                }
+            }
+        }
+
+        // stage('Artifactory_uplaod_to_Nexus') {
+        //     steps {
+        //         script {
+        //                     withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+        //                         // Use environment variables instead of direct interpolation
+        //                         sh """
+        //                 #!/bin/bash
+        //                 # Main logic
+        //                 if [ "${params.Project}" = "Server" ]; then
+        //                 cd "${params.Project}/platform/SERVER/target"
+        //                 curl -u "\$USERNAME:\$PASSWORD" --upload-file "SERVER-jar-with-dependencies.jar" "http://192.168.1.229:8082/repository/external-jars/com/progrecapps/SERVER-jar-with-dependencies/1.0/SERVER-jar-with-dependencies-1.0.jar"
+        //                 curl -u "\$USERNAME:\$PASSWORD" --upload-file "SERVER.jar" "http://192.168.1.229:8082/repository/Platform-Product-jars/SERVER/SERVER.jar"
+
+        //                 elif [ "${params.Project}" = "Module" ]; then
+        //                     found=0
+        //                     pwd
+        //                     echo "${params.Module_Type}"
+        //                     for file in "${params.Module_Type}/server/*"; do
+        //                         if [ \$(basename \$file) = "pom.xml" ]; then
+        //                             found=1
+        //                             break  # Stop after finding the first pom.xml
+        //                         fi
+        //                     done
+
+        //                     if [ \$found -ne 0 ]; then
+        //                         echo "Performing ${params.Module_Type}"
+        //                         pwd
+        //                         cd "${params.Module_Type}/server/target"
+
+        //                         curl -u "$USERNAME:$PASSWORD" --upload-file "*.jar" "http://192.168.1.229:8082/repository/Platform-Product-jars/${params.Module_Type}/"
+        //                         echo "Module jar uploading"
+        //                     else
+        //                         echo "No jar found in server directory"
+        //                     fi
+        //                 else
+        //                     echo "Invalid Project parameter value"
+        //                 fi
+
+        //             """
+        //                 }
+        //             }
+        //     }        
+        // }
+
+        stage('Artifactory_uplaod_to_Nexus') {
+            steps {
+                script {
+                withCredentials([usernamePassword(credentialsId: 'Nexus', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                // Use environment variables instead of direct interpolation
+                
+                // Convert Module_Type to uppercase
+                def UPPERCASE_MODULE_TYPE = params.Module_Type.toUpperCase()
+
+                    sh """
+                        #!/bin/bash
+
+                        set -e  # Exit on any error
+
+                        # Main logic
+                        if [ "${params.Project}" = "Server" ]; then
+                            cd "${params.Project}/platform/SERVER/target"
+                            curl -v -u "\$USERNAME:\$PASSWORD" --upload-file "SERVER-jar-with-dependencies.jar" "https://rndnexus.progrec.com/repository/external-jars/com/progrecapps/SERVER-jar-with-dependencies/1.0/SERVER-jar-with-dependencies-1.0.jar"
+                            curl -v -u "\$USERNAME:\$PASSWORD" --upload-file "SERVER.jar" "https://rndnexus.progrec.com/repository/Platform-Product-jars/SERVER/SERVER.jar"
+
+                        elif [ "${params.Project}" = "Deployment" ]; then
+                            pwd
+                            cd "${params.Project}/target"
+                            ls
+                            pwd
+                            curl -v -u "\$USERNAME:\$PASSWORD" --upload-file "DeploymentMaintenence-1.0.jar" "https://rndnexus.progrec.com/repository/DeploymentMaintenence/Deployment-Jar/DeploymentMaintenence-1.0.jar"
+                            cd ..
+                            curl -v -u "\$USERNAME:\$PASSWORD" --upload-file "deploymentscripts" "https://rndnexus.progrec.com/repository/DeploymentMaintenence/deploymentscripts/deploymentscripts"
+
+                        elif [ "${params.Project}" = "Module" ]; then
+                            pwd
+                            echo "${params.Module_Type}"
+                            
+                            if [ -f "${params.Module_Type}/server/pom.xml" ]; then
+                                # pom.xml found, proceed with build
+                                cd "${params.Module_Type}/server/target"
+                                ls -ltr
+                                for jar in *.jar; do
+                                if [ -f "\$jar" ]; then  # Check if the file exists
+                                    echo "Uploading \$jar..."
+                                curl -v -u "$USERNAME:$PASSWORD" --upload-file "\$jar" "https://rndnexus.progrec.com/repository/Platform-Product-jars/${params.Module_Type}/\$jar"
+                                curl -v -u "$USERNAME:$PASSWORD" --upload-file "\$jar" "https://rndnexus.progrec.com/repository/external-jars/com/progrecapps/${params.Module_Type}/${UPPERCASE_MODULE_TYPE}/1.0/\$jar"
+                                # curl -v -u "$USERNAME:$PASSWORD" --upload-file "*.jar" "https://rndnexus.progrec.com/repository/Platform-Product-jars/${params.Module_Type}/${UPPERCASE_MODULE_TYPE}-1.0.jar"
+                                    break  # Exit the loop after uploading the first found jar
+                                fi
+                                done
+
+                            else
+                                # No pom.xml found
+                                ls -ltr "${params.Module_Type}/server/"
+                                echo "No jar found in the server directory"
+                            fi
+
+                        else
+                            echo "Invalid Project parameter value"
+                        fi
+
+                    """
+                }
+            }
+        }
+      }
+    }
+}

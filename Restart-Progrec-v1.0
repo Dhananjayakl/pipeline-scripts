@@ -1,0 +1,153 @@
+//  The objective of this pipeline is to start the node & the java services based on type of instance.
+// Created on:27-01-2025
+// Updated on:27-01-2025
+// Created By: Dhananjaya K L (Junior_DevOps_Engineer)
+// The sshpass tool in the target instance should be pre installed
+@Library("jenkins-shared-library") _ // IF this pipeline script is using the shared library concept then this command is must, 
+
+     // Define the method outside of the pipeline block
+    def getAgentLabel(instance) {
+    switch (instance.toLowerCase()) {
+        case 'Specify the environment: agent-container':
+            return 'JENKINS-AGENT'
+        case 'testing-container':
+             return 'JENKINS-AGENT-SSH'
+        case 'testing-dev':
+             return 'TESTING-DEV'
+        case 'testing-qa':
+            return 'TESTING-QA'
+        default:
+            error("Invalid environment specified: ${instance}")
+    }
+}
+
+pipeline {
+
+  parameters {
+         // This section used to configure the input to the pipeline
+        // Plugin to be installed: Active Choice Plug-in
+    choice(
+        name: 'Instance',
+        choices: ['agent-container', 'testing-container', 'Testing-Dev' , 'Testing-QA'],
+        description: 'Specify the environment: agent-container,testing-container'
+    )
+
+}
+
+     agent {
+        // Mention the the Jenkins agent label which is configuredi nthe Jenkins console under nodes to execute this pipeline
+        // Plugin to be installed: SSH Agent Plugin
+        label getAgentLabel(params.Instance)
+    }
+
+    options {
+        // Set the custom checkout directory
+        skipDefaultCheckout(true)
+    }
+
+    stages { // This stage will assign the workspace variable to the selected label with all the host details
+        stage('Workspace_Setup') {
+            steps {
+                script {
+                    // Determine which repository URL to use based on Project parameter
+                    switch (params.Instance) {
+                        case 'agent-container':
+                            Host_IP = '192.168.1.229'
+                            Port = '24'
+                            User_Name = 'root'
+                            Password = 'root'                          
+                            break
+                        case 'testing-container':
+                            Host_IP = '192.168.1.229'
+                            Port = '4000'
+                            User_Name = 'root'
+                            Password = 'root'                          
+                            break
+                        case 'Testing-Dev':
+                           Host_IP = '192.168.1.229'
+                            Port = '27'
+                            User_Name = 'root'
+                            Password = 'root'                          
+                            break
+                        case 'Testing-QA':
+                            Host_IP = '192.168.1.229'
+                            Port = '28'
+                            User_Name = 'root'
+                            Password = 'root'                          
+                            break                     
+                                default:
+                                    error "Unsupported SubModule parameter value: ${params.Environment}"
+                            }
+                    }
+                    
+                }
+            }
+ 
+            stage('Stop_service') { // This stage will stop the services in any connected instance
+            steps {
+                script {
+                    // Avoid failure by capturing the exit status of the shell script
+                    def stopNodeStatus = sh( // This script will stop the node service.
+                        script: """
+                            echo "${env.timestamp}"
+                            # Check for running node services
+                            echo "Checking for running node processes..."
+                            
+                            # Find and kill node processes if they are running
+                            NODE_PID=\$(pgrep -f node)
+                            if [ -n "\$NODE_PID" ]; then
+                                echo "Node process found with PID: \$NODE_PID, killing it."
+                                kill -9 \$NODE_PID || echo "Failed to kill Node process, it might have already been stopped."
+                                echo "Node service stopped successfully."
+                            else
+                                echo "No node service running."
+                            fi
+                        """,
+                        returnStatus: true // Capture exit status
+                    )
+
+                    def stopJavaStatus = sh( // This script will check the PID of the jav serive kill it 
+                        script: """
+                            # Check for Java process running on port 8080
+                            echo "Checking for Java process running on port 8080..."
+                            JAVA_PID=\$(lsof -t -i:8080)
+
+                            if [ -n "\$JAVA_PID" ]; then
+                                echo "Java process found with PID: \$JAVA_PID running on port 8080, killing it."
+                                kill -9 \$JAVA_PID || echo "Failed to kill Java process, it might have already been stopped."
+                                echo "Java service stopped successfully."
+                            else
+                                echo "No Java service running on port 8080."
+                            fi
+                        """,
+                        returnStatus: true // Capture exit status
+                    )
+
+                    // Ensure the stage passes regardless of whether processes are found or not
+                    echo "Node stop status: ${stopNodeStatus}, Java stop status: ${stopJavaStatus}"
+                    echo "ProGRec Application Stopped successfully."
+                }
+            }
+        }
+
+            stage('Start_service') { //Working script, both server and client service starting & pipeline stopping after the execution. no extra log.
+                steps {
+                    script {
+                        sh """
+
+                        # Start HRMS Server using nohup with sshpass
+                        nohup sshpass -p '${Password}' ssh -o StrictHostKeyChecking=no -p ${Port} ${User_Name}@${Host_IP} 'nohup java -jar /HRMS/SERVER.jar > /HRMS/Server.log 2>&1 &' &
+
+                        # Start HRMS Client using nohup with sshpass
+                        nohup sshpass -p '${Password}' ssh -o StrictHostKeyChecking=no -p ${Port} ${User_Name}@${Host_IP} 'cd /HRMS/Client && nohup npm start -- --host > /HRMS/Client.log 2>&1 &' &
+                        """
+                    }
+                }
+            }
+        }
+    }       
+
+ 
+   
+
+
