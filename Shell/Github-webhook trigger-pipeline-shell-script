@@ -1,0 +1,74 @@
+# This script will is used in the free style pipeline (Github-webhook-trigger) to trigger the github webhook and identify the Repository.
+# Below script will identify the changes in server folder if yes the subsequent piepline will trigger to build jar & update the instance,
+#  Created on:27-01-2025
+#  Updated on:27-01-2025
+# Created By: Dhananjaya K L (Junior_DevOps_Engineer)
+#!/bin/bash
+
+# Default folder to check for changes
+TARGET_FOLDER="server"
+
+# Ensure the repository is up to date
+#echo "Fetching the latest changes from Git..."
+#git fetch --all || { echo "Failed to fetch changes."; exit 1; }
+
+# Get the current branch
+#CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+#echo "Current branch: $CURRENT_BRANCH"
+
+# Check for changes in the server folder
+changes=$(git diff --name-only HEAD~1 HEAD | grep "^${TARGET_FOLDER}/" || true)
+
+if [ -z "$changes" ]; then
+    echo "No changes detected in ${TARGET_FOLDER}. Exiting with failure."
+    exit 1
+else
+    echo "Changes detected in ${TARGET_FOLDER}:"
+    echo "$changes" # Print the list of changes
+    exit 0
+fi
+
+# --- Below script will trigger the Module-auto-Update pipeline,and pass the REPO_BRANCH_NAME inputs to the subsquent pipeline
+#!/bin/bash
+
+# Jenkins details
+JENKINS_URL="https://rndjenkins.progrec.com/"
+JOB_NAME="Module-auto-update"
+USER="Admin"
+TOKEN="$Jenkins_Token"
+
+# Define the repository URL that triggered this job
+#REPO_URL="$GIT_URL" # Assuming $GIT_URL is set in the freestyle job environment, adjust if necessary
+REPO_BRANCH_NAME="$GIT_BRANCH"  # Assuming $GIT_BRANCH is set in the freestyle job environment
+
+# Ensure REPO_URL is not empty
+#if [ -z "$REPO_URL" ]; then
+ # echo "Error: Repository URL is not available. Aborting trigger."
+  #exit 1
+#fi
+
+if [ -z "$REPO_BRANCH_NAME" ]; then
+  echo "Error: Branch name is not available. Aborting trigger."
+  exit 1
+fi
+#--data-urlencode "REPO_URL=$REPO_URL" \
+# Trigger the pipeline job with the necessary parameters
+echo " Repository & branch : $REPO_BRANCH_NAME "
+echo "Triggering pipeline job: $JOB_NAME with REPO_URL=$REPO_URL"
+curl -X POST "$JENKINS_URL/job/$JOB_NAME/buildWithParameters" \
+  --user "$USER:$TOKEN" \
+  --data-urlencode "REPO_BRANCH_NAME=$REPO_BRANCH_NAME"
+
+# Check the response
+if [ $? -eq 0 ]; then
+  echo "Job '$JOB_NAME' triggered successfully."
+else
+  echo "Failed to trigger job '$JOB_NAME'. Please check the credentials and Jenkins URL."
+fi
+
+# Echo values of REPO_URL and BRANCH_NAME
+#echo "Repository URL: $REPO_URL"
+echo "Repository/Branch Name: $REPO_BRANCH_NAME"
+
+
+

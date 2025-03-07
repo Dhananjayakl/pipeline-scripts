@@ -1,0 +1,44 @@
+#  This script is used in the Build-Project pipeline to trigger the Build-Project pipeline based on the cron expression set.
+#  This script has all the input details of thebuild Project pipeline this will trigger the Build-Project pipleline based on the set time.
+#  Created on:27-01-2025.
+#  Updated on:27-01-2025.
+#  Created By: Dhananjaya K L (Junior_DevOps_Engineer).
+#!/bin/bash
+
+# Jenkins details
+JENKINS_URL="https://rndjenkins.progrec.com/"
+JOB_NAME="Build-Project"
+USER="Admin"
+TOKEN="$Jenkins_Token"
+
+# Parameter values
+Projects=("Server")
+Branch_Names=("development")
+Build_Version="1.0"
+End_Revision="HEAD"
+
+# Module_Type mapping based on Project
+declare -A Module_Type_Map=(
+    ["Server"]="NA"
+)
+
+# Iterate through all combinations, excluding "main"
+for project in "${Projects[@]}"; do
+  for branch in "${Branch_Names[@]}"; do
+    if [[ "$branch" == "main" ]]; then
+      continue # Skip the 'main' branch
+    fi
+
+    # Fetch Module_Type values for the current project
+    Module_Type="${Module_Type_Map[$project]}"
+
+    echo "Triggering build with Project=$project, Branch_Name=$branch, Build_Version=$Build_Version, End_Revision=$End_Revision, Module_Type=$Module_Type"
+    curl -X POST "$JENKINS_URL/job/$JOB_NAME/buildWithParameters" \
+      --user "$USER:$TOKEN" \
+      --data-urlencode "Project=$project" \
+      --data-urlencode "Branch_Name=$branch" \
+      --data-urlencode "Build_Version=$Build_Version" \
+      --data-urlencode "End_Revision=$End_Revision" \
+      --data-urlencode "Module_Type=$Module_Type"
+  done
+done

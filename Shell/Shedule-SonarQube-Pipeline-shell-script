@@ -1,0 +1,47 @@
+#  This script is used in the Shedule-SonarQube pipeline to trigger the sonarQube pipeline based on the cron expression set.
+# This script has all the input details of the sonarQube pipeline this will trigger the soanrQube piplein based on the set time
+#  Created on:27-01-2025
+#  Updated on:27-01-2025
+#  Created By: Dhananjaya K L (Junior_DevOps_Engineer)
+
+#!/bin/bash
+
+# Jenkins details
+JENKINS_URL="https://rndjenkins.progrec.com/"
+JOB_NAME="SonarQube"
+USER="Admin"
+TOKEN="$Jenkins_Token"
+
+# Parameter values
+Project=("Client" "Server" "Module")
+Branch_Name=("main" "development")
+
+# Module_Type mapping based on Project
+declare -A Module_Type_Map=(
+    ["Client"]="NA"
+    ["Server"]="NA"
+    ["Module"]="grc issue risk controltesting businessresilience survey engine admin attendance incident monitor project document employee keyshield leave resolve syscare vendor internalaudit loss crm za"
+)
+
+# Iterate through all combinations, excluding "main"
+for project in "${Project[@]}"; do
+  for branch in "${Branch_Name[@]}"; do
+    if [[ "$branch" == "main" ]]; then
+      continue # Skip the 'main' branch
+    fi
+
+    # Fetch Module_Type values for the current project
+    IFS=' ' read -r -a Module_Type_Array <<< "${Module_Type_Map[$project]}"
+
+    for module in "${Module_Type_Array[@]}"; do
+      echo "Triggering build with Project=$project, Branch_Name=$branch, Module_Type=$module"
+      curl -X POST "$JENKINS_URL/job/$JOB_NAME/buildWithParameters" \
+        --user "$USER:$TOKEN" \
+        --data-urlencode "Project=$project" \
+        --data-urlencode "Branch_Name=$branch" \
+        --data-urlencode "Module_Type=$module"
+    done
+  done
+done
+
+

@@ -1,0 +1,45 @@
+# my global config
+global:
+  scrape_interval: 15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+# Scrape configurations
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: "node"
+    static_configs:
+      - targets: ["192.168.1.229:1111"]
+
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["192.168.1.229:1113"]
+
+  - job_name: "otel-collector"
+    static_configs:
+      - targets: ["192.168.1.229:9464"]
+
+  - job_name: "otel-collector-new"
+    static_configs:
+      - targets: ["192.168.1.227:9465"]
+
+  - job_name: "postgres-exporter"
+    static_configs:
+      - targets: ["192.168.1.229:9187"]

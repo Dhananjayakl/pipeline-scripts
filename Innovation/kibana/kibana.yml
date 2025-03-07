@@ -1,0 +1,10 @@
+#
+# ** THIS IS AN AUTO-GENERATED FILE **
+#
+
+# Default Kibana configuration for docker target
+server.host: "0.0.0.0"
+server.shutdownTimeout: "5s"
+elasticsearch.hosts: ["http://192.168.1.229:9400"]
+elasticsearch.serviceAccountToken: "eyJ2ZXIiOiI4LjE0LjAiLCJhZHIiOlsiMTcyLjE3LjAuMjc6OTIwMCJdLCJmZ3IiOiIwYzE3YzBhYjBkMjEzNGYyNDg4NWZhZGVlNjc1NTQzYjUxNWJiYjhmMjY5YTAyNDI3NjlmNTBmZDg5MDg3NjdkIiwia2V5IjoiMWtJd0JKVUJYajBJMGlJVWpaWGM6aXJKLVhReVFTdzZpUy1qR3A4cE02USJ9"
+monitoring.ui.container.elasticsearch.enabled: true

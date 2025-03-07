@@ -1,0 +1,1 @@
+docker run -d --name elasticsearch -p 9400:9200 -it -m 6GB docker.elastic.co/elasticsearch/elasticsearch:8.17.2

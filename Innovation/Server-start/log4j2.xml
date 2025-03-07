@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" monitorInterval="900">
+    <Properties>
+         <Property name="LOG_PATTERN">%sn %d{yyyy/MM/dd HH:mm:ss,SSSZ} %r [%-6p] [%t] [%X{username}] [trace_id=%X{trace_id} span_id=%X{span_id}] %C{3}.%M(%F:%L) - %m%n</Proper>
+         <Property name="APP_LOG_ROOT">/HRMS/logs</Property>
+    </Properties>
+
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT" follow="true">
+            <PatternLayout pattern="${LOG_PATTERN}" />
+        </Console>
+        <RollingFile name="appLog"
+                fileName="${APP_LOG_ROOT}/ProgrecApps/application.log"
+                filePattern="${APP_LOG_ROOT}/ProgrecApps/application-%d{yyyy-MM-dd}-%i.log">
+            <PatternLayout pattern="${LOG_PATTERN}" />
+            <Policies>
+                <SizeBasedTriggeringPolicy size="50000KB" />
+            </Policies>
+            <DefaultRolloverStrategy max="1" />
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <Logger name="com.howtodoinjava.app" additivity="false">
+            <AppenderRef ref="appLog" />
+            <AppenderRef ref="Console" />
+        </Logger>
+        <Root level="info">
+            <AppenderRef ref="Console" />
+            <AppenderRef ref="appLog" />
+        </Root>
+    </Loggers>
+</Configuration>
